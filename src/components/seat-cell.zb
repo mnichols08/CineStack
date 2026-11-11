@@ -1,0 +1,42 @@
+<!--
+  One seat in one showing. Its state is a Sync document ('use collection seats by showing, seat')
+  that only the server writes: when anyone holds, releases or buys the seat, or a hold runs out,
+  every phone showing this seat follows without a reload. The server HTML already has the state
+  (`state-now`); the element takes over from the document once it loads.
+
+  The seat is a real checkbox inside the seat map's form, so choosing seats works before
+  JavaScript, with a keyboard, and with a screen reader.
+-->
+<script>
+  'use collection seats by showing, seat'
+  import { from } from '@zubra/runtime'
+
+  let state = from(stateNow)
+  let by = from(byNow)
+  let until = from(untilNow)
+
+  const mine = state === 'held' && by === me
+  const gone = state === 'sold' || (state === 'held' && by !== me)
+  const kinds = { recliner: 'recliner', wheelchair: 'wheelchair space', companion: 'companion seat' }
+  const name = `Seat ${seat}${kinds[kind] ? `, ${kinds[kind]}` : ''}${gone ? ', taken' : mine ? ', held for you' : ''}`
+</script>
+<style>
+  :host { display: block; }
+  label { display: block; position: relative; width: var(--seat, 1.9rem); height: var(--seat, 1.9rem); cursor: pointer; }
+  input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
+  span { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 0.45rem 0.45rem 0.2rem 0.2rem; background: var(--seat-free, #3a3f4b); color: var(--seat-ink, #d6d9e0); font-size: 0.7rem; font-variant-numeric: tabular-nums; box-shadow: inset 0 -3px 0 rgb(0 0 0 / 0.25); transition: background 0.2s, color 0.2s, transform 0.15s; }
+  .recliner span { border-radius: 0.6rem 0.6rem 0.2rem 0.2rem; box-shadow: inset 0 -5px 0 rgb(0 0 0 / 0.3); }
+  .wheelchair span, .companion span { outline: 2px dashed var(--seat-access, #7fb4ff); outline-offset: -2px; }
+  label:hover span { transform: translateY(-1px); }
+  input:focus-visible + span { outline: 3px solid var(--seat-focus, #ffd166); outline-offset: 2px; }
+  .mine span { background: var(--seat-mine, #ffd166); color: #1a1c22; font-weight: 700; }
+  .gone { cursor: not-allowed; }
+  .gone span { background: var(--seat-gone, #1e2026); color: var(--seat-gone-ink, #5b6170); box-shadow: none; transform: none; }
+  @media (prefers-reduced-motion: reduce) { span { transition: none; } }
+</style>
+<seat-cell showing="" seat="" number={0} kind="standard" me="" state-now="free" by-now="" until-now={0}>
+  <label class={kind} class:mine={mine} class:gone={gone}>
+    <input type="checkbox" name="seat" value={seat} checked={mine} disabled={gone} aria-label={name}>
+    <span aria-hidden="true">{number}</span>
+  </label>
+</seat-cell>

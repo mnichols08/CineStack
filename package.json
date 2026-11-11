@@ -1,0 +1,25 @@
+{
+  "name": "cinestack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A movie theatre platform: showtimes, seats, snacks and tickets, run by the theatre's own manager. Built with Zubra on one small Node server.",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@zubra/actions": "5.4.1",
+    "@zubra/compiler": "5.4.1",
+    "@zubra/runtime": "5.4.1",
+    "@zubra/server": "5.4.1",
+    "@zubra/sync": "5.4.1"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}

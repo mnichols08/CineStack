@@ -1,0 +1,124 @@
+<!--
+  The seat map for one showing: a form of seats (`seat-cell`), and the guest's own hold.
+
+  Choosing is a 'use server' function, because two people can want the same seat and the server
+  has to pick one. Without JavaScript the guest ticks seats and presses the button; with it, each
+  tap is sent on its own and the page stays put.
+
+  The guest's hold (which seats, until when) is a Sync document the server writes
+  ('use collection holds by showing, me'), so the summary follows a second tab, and empties by
+  itself when the hold runs out.
+-->
+<script>
+  'use collection holds by showing, me'
+  import { from, onMount } from '@zubra/runtime'
+  import { ephemeral } from '@zubra/sync'
+  import './seat-cell.zb'
+
+  let seats = from(seatsNow)
+  let until = from(untilNow)
+  let now = ephemeral(0)
+  let problem = ephemeral('')
+
+  export async function choose(formData, context) {
+    'use server'
+    return context.boxOffice.choose(context.guest, formData)
+  }
+
+  onMount(() => {
+    now = Date.now()
+    const timer = setInterval(() => (now = Date.now()), 500)
+    return () => clearInterval(timer)
+  })
+
+  const left = now && until > now ? Math.ceil((until - now) / 1000) : 0
+  const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
+
+  // A tap: send just this seat. The checkbox stays as tapped until the server answers.
+  const pick = (event) => {
+    if (event.target.name !== 'seat') return
+    const form = event.currentTarget
+    form.elements.toggle.value = event.target.value
+    form.requestSubmit()
+    form.elements.toggle.value = ''
+  }
+  const answered = (event) => {
+    const result = event.detail.value ?? {}
+    problem = result.error ?? event.detail.error ?? ''
+    if (!problem || !result.seat) return
+    // The seat went to someone else: put the checkbox back; its document says why.
+    for (const input of event.currentTarget.elements.seat) if (input.value === result.seat) input.checked = false
+  }
+</script>
+<style>
+  :host { display: block; }
+  form { display: grid; gap: 1.25rem; }
+  .screen { margin: 0 auto; width: min(100%, 34rem); padding-top: 0.35rem; border-top: 4px solid var(--screen, #cfd6e4); border-radius: 50% 50% 0 0 / 0.9rem 0.9rem 0 0; text-align: center; font-size: 0.7rem; letter-spacing: 0.3em; text-transform: uppercase; color: var(--muted-foreground, #8b92a3); }
+  /* A flex parent keeps a map wider than the phone scrollable from its left edge. */
+  .scroll { display: flex; overflow-x: auto; padding: 0.25rem 0 0.75rem; }
+  .rows { display: grid; gap: 0.4rem; flex: none; margin: 0 auto; }
+  .row { display: flex; align-items: center; gap: 0.3rem; }
+  .row-label { width: 1.25rem; font-size: 0.75rem; color: var(--muted-foreground, #8b92a3); text-align: center; }
+  .gap { width: 1.2rem; }
+  .key { display: flex; flex-wrap: wrap; gap: 0.4rem 1.25rem; justify-content: center; margin: 0; padding: 0; list-style: none; font-size: 0.85rem; color: var(--muted-foreground, #8b92a3); }
+  .key li { display: flex; align-items: center; gap: 0.4rem; }
+  .key i { width: 0.9rem; height: 0.9rem; border-radius: 0.25rem; background: var(--seat-free, #3a3f4b); }
+  .key .k-mine { background: var(--seat-mine, #ffd166); }
+  .key .k-gone { background: var(--seat-gone, #1e2026); box-shadow: inset 0 0 0 1px #3a3f4b; }
+  .key .k-access { background: none; outline: 2px dashed var(--seat-access, #7fb4ff); outline-offset: -2px; }
+  .hold { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1.5rem; padding: 1rem 1.25rem; border-radius: 0.75rem; background: var(--card, #20232b); position: sticky; bottom: 0.75rem; box-shadow: 0 0 0 1px var(--border, #333847), 0 8px 24px rgb(0 0 0 / 0.35); }
+  .hold p { margin: 0; }
+  .hold strong { font-size: 1.05rem; }
+  .hold small { display: block; color: var(--muted-foreground, #8b92a3); }
+  .time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--seat-mine, #ffd166); }
+  .problem { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #4a1f24; color: #ffd9dc; }
+  button { font: inherit; font-weight: 700; padding: 0.65rem 1.1rem; border: 0; border-radius: 0.5rem; background: var(--seat-mine, #ffd166); color: #1a1c22; cursor: pointer; }
+  @media (max-width: 40rem) { .rows { --seat: 1.6rem; gap: 0.3rem; } .row { gap: 0.2rem; } .gap { width: 0.7rem; } }
+  /* With JavaScript every tap is sent as it happens, so the button has nothing left to do. */
+  :host(:state(hydrated)) .apply { display: none; }
+</style>
+<seat-map showing="" me="" rows={[]} seats-now={[]} until-now={0} hold-minutes={5}>
+  <form action={choose} onchange={pick} onaction={answered}>
+    <input type="hidden" name="showing" value={showing}>
+    <input type="hidden" name="toggle" value="">
+    <p class="screen">Screen</p>
+    <div class="scroll">
+      <div class="rows" role="group" aria-label="Seats">
+        <zb-each items={rows} as="row" key={row.label}>
+          <div class="row">
+            <span class="row-label" aria-hidden="true">{row.label}</span>
+            <zb-each items={row.cells} as="cell" key={cell.id}>
+              <zb-if test={cell.gap}>
+                <span class="gap"></span>
+                <zb-else>
+                  <seat-cell showing={showing} seat={cell.id} number={cell.number} kind={cell.kind} me={me} state-now={cell.state} by-now={cell.by} until-now={cell.until}></seat-cell>
+                </zb-else>
+              </zb-if>
+            </zb-each>
+            <span class="row-label" aria-hidden="true">{row.label}</span>
+          </div>
+        </zb-each>
+      </div>
+    </div>
+    <ul class="key" aria-hidden="true">
+      <li><i></i>Free</li>
+      <li><i class="k-mine"></i>Yours</li>
+      <li><i class="k-gone"></i>Taken</li>
+      <li><i class="k-access"></i>Wheelchair space and companion</li>
+    </ul>
+    <p class="problem" role="alert" zb-if={problem}>{problem}</p>
+    <div class="hold" aria-live="polite">
+      <zb-if test={seats.length}>
+        <p>
+          <strong>{seats.length === 1 ? 'Seat' : 'Seats'} {seats.join(', ')}</strong>
+          <small zb-if={left}>Held for you for <span class="time">{clock}</span></small>
+          <small zb-if={!left}>Held for you for {holdMinutes} minutes from your last choice</small>
+        </p>
+        <zb-else>
+          <p><strong>Choose your seats</strong><small>Each seat is held for you for {holdMinutes} minutes.</small></p>
+        </zb-else>
+      </zb-if>
+      <button class="apply" type="submit">Hold these seats</button>
+    </div>
+  </form>
+</seat-map>
