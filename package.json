@@ -5,6 +5,7 @@
   "type": "module",
   "description": "A movie theatre platform: showtimes, seats, snacks and tickets, run by the theatre's own manager. Built with Zubra on one small Node server.",
   "scripts": {
+    "postinstall": "patch-package --error-on-fail",
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test test/*.test.js"
@@ -15,7 +16,8 @@
     "@zubra/compiler": "5.9.1",
     "@zubra/runtime": "5.9.1",
     "@zubra/server": "5.9.1",
-    "@zubra/sync": "5.9.1"
+    "@zubra/sync": "5.9.1",
+    "patch-package": "8.0.1"
   },
   "devDependencies": {
     "playwright": "1.63.0"
