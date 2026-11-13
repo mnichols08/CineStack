@@ -52,7 +52,7 @@ npm start        # http://localhost:3000
 npm test         # needs Chrome or Playwright's Chromium
 ```
 
-Node 22.13 or later. `SESSION_SECRET` is required in production; `DATA_DIR` says where the database file goes.
+Node 22.13 or later. `SESSION_SECRET` is required in production; `DATA_DIR` says where the database file goes. Behind a proxy (Railway, Fly, a load balancer), set `TRUST_PROXIES` to how many add to `X-Forwarded-For` (usually `1`), so a wrong-password lockout falls on the device guessing and not on everyone; left unset, no header is trusted and every sign-in counts as the proxy's address.
 
 Relative component imports work on Windows from Zubra 5.10.2 (the compiler keyed them by `/` paths only; CineStack patched it until the fix shipped).
 
