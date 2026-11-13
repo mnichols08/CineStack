@@ -27,12 +27,12 @@ for (const cache of [true, false]) {
       const hall = app.boxOffice.hall(showing.auditorium);
       const seats = hall.layout.flatMap((row) => row.cells.filter((cell) => !cell.gap));
       assert.equal([...body.matchAll(/name="seat"/g)].length, seats.length, path);
-      assert.match(body, /<seat-map\b/);
+      assert.match(body, /<seat-chart\b/);
       assert.match(body, /<seat-cell\b/);
       assert.match(body, /href="\/"/);
     }
 
-    for (const name of ['seat-map', 'seat-cell']) {
+    for (const name of ['seat-chart', 'seat-cell']) {
       const response = await fetch(`${base}/_zubra/components/${name}.js`);
       const body = await response.text();
       assert.equal(response.status, 200, body);

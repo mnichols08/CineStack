@@ -1,9 +1,0 @@
-diff --git a/node_modules/@zubra/compiler/index.js b/node_modules/@zubra/compiler/index.js
---- a/node_modules/@zubra/compiler/index.js
-+++ b/node_modules/@zubra/compiler/index.js
-@@ -13 +13 @@
--import { dirname, join, posix, resolve } from 'node:path';
-+import { dirname, join, posix, resolve, sep } from 'node:path';
-@@ -53 +53 @@
--export function sources(path, files = {}, key = resolve(path)) {
-+export function sources(path, files = {}, key = resolve(path).split(sep).join('/')) {

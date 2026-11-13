@@ -6,6 +6,7 @@ const STYLE = `
   :root {
     --background: #14161b; --foreground: #eceef3; --card: #20232b; --border: #333847; --muted-foreground: #9299ab;
     --accent: #ffd166; --seat-mine: var(--accent);
+    --primary: var(--accent); --primary-foreground: #1a1c22; --ring: var(--accent); --input: var(--border); --muted: #2a2e38; --radius: 0.75rem;
     color-scheme: dark;
   }
   * { box-sizing: border-box; }
@@ -32,6 +33,10 @@ const STYLE = `
   .specs { display: flex; flex-wrap: wrap; gap: 0.4rem; padding: 0; margin: 0.6rem 0 0; list-style: none; }
   .specs li { padding: 0.15rem 0.6rem; border-radius: 999px; box-shadow: 0 0 0 1px var(--border); font-size: 0.85rem; color: var(--muted-foreground); }
   .back { color: var(--muted-foreground); font-size: 0.9rem; }
+  .ticket { display: grid; gap: 0.75rem; justify-items: start; }
+  .ticket .seats { margin: 0; font-size: 1.15rem; }
+  .ticket .qr { width: min(18rem, 100%); padding: 0.75rem; border-radius: 0.75rem; background: #fff; color: #000; }
+  .ticket .qr svg { display: block; width: 100%; height: auto; }
   .notice { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #4a1f24; color: #ffd9dc; }
 `;
 
