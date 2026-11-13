@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { createApp } from '../server.js';
+import { loadQr } from '@journey-to-code/symbology';
 
 const dir = mkdtempSync(join(tmpdir(), 'cinestack-'));
 const errors = [];
@@ -49,19 +50,30 @@ async function phone(site, name, { javaScriptEnabled = true } = {}) {
   page.on('console', (message) => message.type() === 'error' && !/403/.test(message.text()) && errors.push(`${name}: ${message.text()}`));
   await page.goto(site.base + site.path);
   if (javaScriptEnabled) {
-    await page.waitForFunction(() => customElements.get('seat-cell') && customElements.get('seat-map'));
+    await page.waitForFunction(() => customElements.get('seat-cell') && customElements.get('seat-chart'));
     await page.waitForTimeout(400); // documents loaded, live stream open
   }
   /** Post the choose action the way the page's own fetch does. */
   const choose = async (form) => {
-    const response = await context.request.post(`${site.base}/_zb/action/seat-map/choose`, {
+    const response = await context.request.post(`${site.base}/_zb/action/seat-chart/choose`, {
       form: { showing: site.showing, ...form },
       headers: { accept: 'application/json', 'sec-fetch-site': 'same-origin' },
       maxRedirects: 0,
     });
     return { status: response.status(), body: await response.json().catch(() => null) };
   };
-  return { context, page, choose, seat: (id) => page.locator(`input[name=seat][value=${id}]`) };
+  /** The payment page's form, filled, as the guest would post it. */
+  const checkout = async (card = '4242 4242 4242 4242') => {
+    const html = await (await context.request.get(`${site.base}/book/${site.showing}`)).text();
+    const key = /name="checkout" value="([\w-]+)"/.exec(html)?.[1];
+    return { checkout: key ?? '', name: name, email: 'guest@example.com', card };
+  };
+  /** Post the payment form; where the server sends the guest. */
+  const pay = async (form, headers = {}) => {
+    const response = await context.request.post(`${site.base}/book/${site.showing}`, { form, headers, maxRedirects: 0 });
+    return { status: response.status(), location: decodeURIComponent(response.headers().location ?? '') };
+  };
+  return { context, page, choose, checkout, pay, seat: (id) => page.locator(`input[name=seat][value=${id}]`) };
 }
 
 /** A seat nobody has, from the server's own view. */
@@ -126,7 +138,7 @@ test('a tap is seen on every phone, and only that seat changes', async () => {
   const ben = await phone(app, 'ben');
   const annTab = await ann.context.newPage();
   await annTab.goto(app.base + app.path);
-  await annTab.waitForFunction(() => customElements.get('seat-map'));
+  await annTab.waitForFunction(() => customElements.get('seat-chart'));
   await annTab.waitForTimeout(400);
   const [seat, second] = freeSeats(app, 2, 'F');
 
@@ -140,7 +152,7 @@ test('a tap is seen on every phone, and only that seat changes', async () => {
         const cell = (record.target.nodeType === 1 ? record.target : record.target.parentElement)?.closest('seat-cell');
         window.touched.add(cell ? cell.querySelector('input').value : 'outside a seat');
       }
-    }).observe(document.querySelector('seat-map .rows'), { subtree: true, childList: true, attributes: true, characterData: true });
+    }).observe(document.querySelector('seat-chart .rows'), { subtree: true, childList: true, attributes: true, characterData: true });
   });
 
   await ann.seat(seat).click({ force: true });
@@ -150,9 +162,9 @@ test('a tap is seen on every phone, and only that seat changes', async () => {
   assert.equal(await ben.page.evaluate(() => window.structural), 0, 'no nodes were added or removed');
 
   // Ann's summary, with a countdown, here and in her other tab.
-  await ann.page.waitForFunction(() => /\d:\d\d/.test(document.querySelector('seat-map .hold').innerText));
+  await ann.page.waitForFunction(() => /\d:\d\d/.test(document.querySelector('seat-chart .hold').innerText));
   assert.match(await ann.page.locator('.hold').innerText(), new RegExp(`Seat ${seat}`));
-  await annTab.waitForFunction((id) => document.querySelector('seat-map .hold').innerText.includes(`Seat ${id}`), seat);
+  await annTab.waitForFunction((id) => document.querySelector('seat-chart .hold').innerText.includes(`Seat ${id}`), seat);
   assert.ok(await annTab.locator(`input[name=seat][value=${seat}]`).isChecked());
 
   // Ben can't have it, even asking the server directly.
@@ -165,14 +177,14 @@ test('a tap is seen on every phone, and only that seat changes', async () => {
     input.disabled = false; // as if the news hadn't arrived
     input.click();
   }, second);
-  await ann.page.waitForFunction(() => document.querySelector('seat-map .problem'));
+  await ann.page.waitForFunction(() => document.querySelector('seat-chart .problem'));
   assert.match(await ann.page.locator('.problem').innerText(), new RegExp(`Seat ${second} was just taken`));
   assert.ok(!(await ann.seat(second).isChecked()));
 
   // Ann taps her seat again to let it go; Ben's phone frees it.
   await ann.seat(seat).click({ force: true });
   await ben.page.waitForFunction((id) => !document.querySelector(`input[name=seat][value=${id}]`).disabled, seat);
-  await ann.page.waitForFunction(() => document.querySelector('seat-map .hold').innerText.includes('Choose your seats'));
+  await ann.page.waitForFunction(() => document.querySelector('seat-chart .hold').innerText.includes('Choose your seats'));
   await ann.context.close();
   await ben.context.close();
 });
@@ -186,12 +198,97 @@ test('a hold runs out on the server, and every phone sees the seat come back', a
   // Nobody does anything. A second and a half later the server lets it go.
   await ben.page.waitForFunction((id) => !document.querySelector(`input[name=seat][value=${id}]`).disabled, seat, { timeout: 5000 });
   await ann.page.waitForFunction((id) => !document.querySelector(`input[name=seat][value=${id}]`).checked, seat, { timeout: 5000 });
-  await ann.page.waitForFunction(() => document.querySelector('seat-map .hold').innerText.includes('Choose your seats'));
+  await ann.page.waitForFunction(() => document.querySelector('seat-chart .hold').innerText.includes('Choose your seats'));
   assert.equal(quick.server.boxOffice.taken(quick.showing).has(seat), false);
   // And a third guest can take it.
   const cy = await phone(quick, 'cy (quick)', { javaScriptEnabled: false });
   assert.equal((await cy.choose({ toggle: seat })).body.ok, true);
   await Promise.all([ann, ben, cy].map((guest) => guest.context.close()));
+});
+
+test('without JavaScript: hold seats, pay, and get a ticket; the seats are sold for everyone', async () => {
+  const guest = await phone(app, 'buyer', { javaScriptEnabled: false });
+  const [a, b] = freeSeats(app, 2, 'F');
+  await guest.seat(a).check({ force: true });
+  await guest.seat(b).check({ force: true });
+  await guest.page.click('button.apply');
+  await guest.page.waitForURL(app.base + app.path);
+  assert.match(await guest.page.locator('seat-chart a.book').innerText(), /Book all 2 · \$22\.00/);
+  await guest.page.click('seat-chart a.book');
+  await guest.page.waitForURL(`${app.base}/book/${app.showing}`);
+  assert.match(await guest.page.locator('checkout-form').innerText(), new RegExp(`Seat ${a}[\\s\\S]*Seat ${b}[\\s\\S]*\\$22\\.00`));
+  await guest.page.fill('checkout-form input[name=name]', 'Rosa');
+  await guest.page.fill('checkout-form input[name=email]', 'rosa@example.com');
+  await guest.page.fill('checkout-form input[name=card]', '4242 4242 4242 4242');
+  await guest.page.click('checkout-form button[type=submit]');
+  await guest.page.waitForURL(/\/ticket\/b[a-z0-9]+$/);
+  assert.match(await guest.page.locator('.ticket').innerText(), new RegExp(`Seats ${a}, ${b} · \\$22\\.00[\\s\\S]*Booked by Rosa`));
+  // The code is the ticket's key, drawn by symbology, and reads back as it.
+  const url = guest.page.url();
+  const qr = await loadQr();
+  const key = url.split('/').pop();
+  const code = qr.encode(key);
+  assert.equal(qr.svg(code, { title: `Ticket ${key}` }).replace(/<rect([^>]*)\/>/, '<rect$1></rect>').replace(/<path([^>]*)\/>/, '<path$1></path>'), await guest.page.locator('.ticket .qr').innerHTML());
+  const scale = 4;
+  const side = (code.size + 8) * scale;
+  const luma = new Uint8Array(side * side).fill(255);
+  for (let y = 0; y < code.size; y++) for (let x = 0; x < code.size; x++) if (code.modules[y * code.size + x]) for (let dy = 0; dy < scale; dy++) for (let dx = 0; dx < scale; dx++) luma[((y + 4) * scale + dy) * side + (x + 4) * scale + dx] = 0;
+  assert.equal(qr.decodeText({ width: side, height: side, luma }), key);
+
+  // Sold, not held: for this guest's map and everyone else's.
+  for (const seat of [a, b]) assert.equal(app.server.boxOffice.taken(app.showing).get(seat).state, 'sold');
+  const other = await phone(app, 'after the sale', { javaScriptEnabled: false });
+  assert.ok(await other.seat(a).isDisabled());
+  // Someone else's ticket isn't theirs to see, and the paid booking can't be paid again.
+  assert.equal((await other.context.request.get(url)).status(), 404);
+  await guest.page.goto(`${app.base}/book/${app.showing}`);
+  assert.equal(guest.page.url(), app.base + app.path, 'nothing held: back to the seats');
+  await guest.context.close();
+  await other.context.close();
+});
+
+test('a declined card books nothing: the seats stay held, to try another card', async () => {
+  const guest = await phone(app, 'declined', { javaScriptEnabled: false });
+  const [a, b] = freeSeats(app, 2, 'G');
+  assert.equal((await guest.choose({ toggle: a })).body.ok, true);
+  assert.equal((await guest.choose({ toggle: b })).body.ok, true);
+  const form = await guest.checkout('4000 0000 0000 0002');
+  assert.match(form.checkout, /^b[a-z0-9]+$/);
+  assert.equal((await guest.pay(form)).location, `/book/${app.showing}?problem=That card was declined. Try another.`);
+  assert.equal(app.server.boxOffice.taken(app.showing).get(a).state, 'held', 'still held');
+
+  // Another guest can't pay for these seats with this guest's checkout, and another site can't post at all.
+  const other = await phone(app, 'not theirs', { javaScriptEnabled: false });
+  assert.equal((await other.pay({ ...form, card: '4242' })).location, `/book/${app.showing}?problem=Your seats aren’t held any more. Choose them again.`);
+  assert.equal((await guest.pay({ ...form, card: '4242' }, { 'sec-fetch-site': 'cross-site' })).status, 403);
+
+  const paid = await guest.pay({ ...form, card: '4242 4242 4242 4242' });
+  assert.match(paid.location, /^\/ticket\/b[a-z0-9]+$/);
+  assert.equal(paid.location, `/ticket/${form.checkout}`, 'the same booking, paid on the second try');
+  assert.equal(app.server.boxOffice.taken(app.showing).get(b).state, 'sold');
+
+  // A new seat is a new booking: the old payment form can't pay for it.
+  const [c] = freeSeats(app, 1, 'G');
+  assert.equal((await guest.choose({ toggle: c })).body.ok, true);
+  assert.equal((await guest.pay(form)).location, `/book/${app.showing}?problem=Your seats aren’t held any more. Choose them again.`);
+  assert.equal(app.server.boxOffice.taken(app.showing).get(c).state, 'held');
+  // Letting go of every seat ends the booking: there's nothing to pay for.
+  assert.equal((await guest.choose({ toggle: c })).body.ok, true);
+  assert.equal((await guest.context.request.get(`${app.base}/book/${app.showing}`, { maxRedirects: 0 })).headers().location, `/show/${app.showing}`);
+  await guest.context.close();
+  await other.context.close();
+});
+
+test('a hold that runs out before paying books nothing', async () => {
+  const guest = await phone(quick, 'too slow', { javaScriptEnabled: false });
+  const [seat] = freeSeats(quick, 1, 'H');
+  assert.equal((await guest.choose({ toggle: seat })).body.ok, true);
+  const form = await guest.checkout();
+  await new Promise((done) => setTimeout(done, 2000));
+  const late = await guest.pay(form);
+  assert.ok(late.location.startsWith(`/book/${quick.showing}?problem=`), late.location);
+  assert.notEqual(quick.server.boxOffice.taken(quick.showing).get(seat)?.state, 'sold');
+  await guest.context.close();
 });
 
 test('guests cannot write seats themselves, and the server code stays on the server', async () => {
@@ -201,8 +298,10 @@ test('guests cannot write seats themselves, and the server code stays on the ser
     headers: { 'sec-fetch-site': 'same-origin' },
   });
   assert.equal(push.status(), 403);
-  const module = await (await guest.context.request.get(`${app.base}/_zubra/components/seat-map.js`)).text();
+  const module = await (await guest.context.request.get(`${app.base}/_zubra/components/seat-chart.js`)).text();
   assert.ok(module.length > 500);
   assert.ok(!module.includes('boxOffice'), 'the server function body is not in the browser module');
+  // A browser asks for a favicon on its own; the theatre has none yet, and that isn't an error.
+  assert.equal((await guest.context.request.get(`${app.base}/favicon.ico`)).status(), 204);
   await guest.context.close();
 });

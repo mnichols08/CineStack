@@ -31,6 +31,7 @@
     return () => clearInterval(timer)
   })
 
+  const money = (cents) => `$${(cents / 100).toFixed(2)}`
   const left = now && until > now ? Math.ceil((until - now) / 1000) : 0
   const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`
 
@@ -72,12 +73,13 @@
   .hold small { display: block; color: var(--muted-foreground, #8b92a3); }
   .time { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--seat-mine, #ffd166); }
   .problem { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #4a1f24; color: #ffd9dc; }
+  .book { font-weight: 700; padding: 0.65rem 1.1rem; border-radius: 0.5rem; background: var(--seat-mine, #ffd166); color: #1a1c22; text-decoration: none; }
   button { font: inherit; font-weight: 700; padding: 0.65rem 1.1rem; border: 0; border-radius: 0.5rem; background: var(--seat-mine, #ffd166); color: #1a1c22; cursor: pointer; }
   @media (max-width: 40rem) { .rows { --seat: 1.6rem; gap: 0.3rem; } .row { gap: 0.2rem; } .gap { width: 0.7rem; } }
   /* With JavaScript every tap is sent as it happens, so the button has nothing left to do. */
   :host(:state(hydrated)) .apply { display: none; }
 </style>
-<seat-map showing="" me="" rows={[]} seats-now={[]} until-now={0} hold-minutes={5}>
+<seat-chart showing="" me="" rows={[]} seats-now={[]} until-now={0} hold-minutes={5} seat-cents={0}>
   <form action={choose} onchange={pick} onaction={answered}>
     <input type="hidden" name="showing" value={showing}>
     <input type="hidden" name="toggle" value="">
@@ -119,6 +121,7 @@
         </zb-else>
       </zb-if>
       <button class="apply" type="submit">Hold these seats</button>
+      <a class="book" zb-if={seats.length} href={`/book/${showing}`}>Book {seats.length === 1 ? 'it' : `all ${seats.length}`} · {money(seats.length * seatCents)}</a>
     </div>
   </form>
-</seat-map>
+</seat-chart>

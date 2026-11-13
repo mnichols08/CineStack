@@ -44,6 +44,12 @@ export const auditoriums = [
   { id: '8', name: 'Auditorium 8', specs: ['Screening room', 'Private hire'], layout: grid({ rows: 5, seats: 8, aisles: [4], wheelchair: ['E1'], companion: ['E2'] }) },
 ];
 
+/**
+ * What one seat costs, in cents, until price rules arrive (adult, child, matinee, discount day,
+ * 3D). A placeholder: Garrett 8's own prices replace it in the prices milestone.
+ */
+export const SEAT_CENTS = 1100;
+
 // Placeholder programme. Real titles, posters and trailers arrive with the film lookup.
 export const films = [
   { id: 'night-ferry', title: 'Night Ferry', rating: 'PG-13', minutes: 112, label: 'Staff Pick' },

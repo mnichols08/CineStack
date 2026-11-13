@@ -5,11 +5,14 @@
 //   at a showing sees a seat change the moment it happens.
 // - Choosing seats is a 'use server' function (@zubra/actions): a plain form post, with or
 //   without JavaScript. The box office (src/box-office.js) decides who gets a seat.
+// - Holding, paying and the ticket are the Potomac kit's reserve, pay and stages; the payment
+//   page is the kit's checkout-form, from the package. The ticket's QR code is symbology's.
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createZubra } from '@zubra/server';
 import { createActions } from '@zubra/actions';
+import { loadQr } from '@journey-to-code/symbology';
 import { createBoxOffice } from './src/box-office.js';
 import { sessions } from './src/session.js';
 import { layout, escape } from './src/layout.js';
@@ -26,7 +29,8 @@ export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cines
   }
   const boxOffice = createBoxOffice({ db, holdMs, sweepMs });
   const session = sessions({ secret });
-  const zubra = createZubra({ components, cache });
+  const zubra = createZubra({ components, cache, packages: ['@potomac-solutions/kit/components'] });
+  const qr = await loadQr();
   const actions = await createActions({
     components,
     context: ({ request }) => ({ boxOffice, guest: session.fromRequest(request) }),
@@ -35,6 +39,46 @@ export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cines
   function send(res, status, html) {
     res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
+  }
+  const back = (res, location) => (res.writeHead(303, { location }), res.end());
+  const money = (cents) => `$${(cents / 100).toFixed(2)}`;
+
+  /** A small urlencoded form, or null when it's bigger than any of CineStack's forms. */
+  async function readForm(req) {
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+      if (body.length > 4000) return null;
+    }
+    return new URLSearchParams(body);
+  }
+
+  /** Paying for held seats: the kit's checkout-form, one line per seat. */
+  function bookPage(p, showing, booking, problem) {
+    const film = boxOffice.film(showing.film);
+    const cart = { lines: booking.units.map((seat, i) => ({ item: seat, qty: 1, name: `Seat ${seat}`, total: booking.lines[i]?.cents ?? 0 })), cents: booking.cents, ready: booking.state === 'held' || booking.state === 'failed' };
+    return `<section>
+  <a class="back" href="/show/${showing.id}">Back to the seats</a>
+  <h1>${escape(film.title)}</h1>
+  <p class="lede">${time(showing.starts)} · ${escape(boxOffice.hall(showing.auditorium).name)} · held for you until ${time(booking.until)}</p>
+</section>
+${p.render('checkout-form', { cart, place: `/book/${showing.id}`, checkout: booking.key, problem, testMode: true })}`;
+  }
+
+  /**
+   * A ticket: what it's for, and the code the door scans. The code is the ticket's key, which is
+   * all the door needs to look it up, and carries no address that could be wrong for the host.
+   */
+  function ticketPage(ticket) {
+    const code = qr.svg(qr.encode(ticket.key), { title: `Ticket ${ticket.key}` });
+    return `<section class="ticket">
+  <p class="tag">Ticket · test mode</p>
+  <h1>${escape(ticket.film.title)}</h1>
+  <p class="lede">${time(ticket.showing.starts)} · ${escape(ticket.hall.name)}</p>
+  <p class="seats">${ticket.units.length === 1 ? 'Seat' : 'Seats'} <strong>${escape(ticket.units.join(', '))}</strong> · ${money(ticket.cents)}</p>
+  <div class="qr">${code}</div>
+  <p class="lede">Show this at the door.${ticket.name ? ` Booked by ${escape(ticket.name)}.` : ''}</p>
+</section>`;
   }
   const page = (res, p, title, body) => send(res, 200, p.finish(layout({ title, theatre: boxOffice.theatre, body, actionsScript: actions.script() })));
 
@@ -71,7 +115,7 @@ export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cines
   <ul class="specs">${hall.specs.map((spec) => `<li>${escape(spec)}</li>`).join('')}</ul>
 </section>
 ${problem ? `<p class="notice" role="alert">${escape(problem)}</p>` : ''}
-${p.render('seat-map', { showing: showing.id, me: guest.pub, rows, seatsNow: held.seats, untilNow: held.until, holdMinutes: Math.round(boxOffice.holdMs / 60_000) })}`;
+${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: held.seats, untilNow: held.until, holdMinutes: Math.round(boxOffice.holdMs / 60_000), seatCents: boxOffice.seatCents })}`;
   }
 
   const server = createServer(async (req, res) => {
@@ -80,6 +124,19 @@ ${p.render('seat-map', { showing: showing.id, me: guest.pub, rows, seatsNow: hel
       if (await actions.handle(req, res)) return;
       if (zubra.handle(req, res)) return;
       const url = new URL(req.url, 'http://localhost');
+      if (url.pathname === '/favicon.ico') return res.writeHead(204).end();
+
+      // Paying for held seats: the kit's checkout-form posts here. A post another site sends is
+      // refused (the guest cookie is SameSite=Lax as well).
+      const booking = url.pathname.match(/^\/book\/([\w-]+)$/);
+      if (booking && req.method === 'POST') {
+        if (req.headers['sec-fetch-site'] === 'cross-site') return send(res, 403, 'Forbidden');
+        const form = await readForm(req);
+        if (!form) return send(res, 413, 'Too large');
+        const done = await boxOffice.book(session.read(req.headers.cookie ?? ''), booking[1], form);
+        return back(res, done.ok ? `/ticket/${done.ticket}` : `/book/${booking[1]}?problem=${encodeURIComponent(done.error)}`);
+      }
+
       if (url.pathname === '/health') {
         res.writeHead(200, { 'content-type': 'text/plain' });
         return res.end('ok');
@@ -95,6 +152,15 @@ ${p.render('seat-map', { showing: showing.id, me: guest.pub, rows, seatsNow: hel
       const match = url.pathname.match(/^\/show\/([\w-]+)$/);
       const showing = match && boxOffice.showing(match[1]);
       if (showing) return page(res, p, boxOffice.film(showing.film).title, show(p, showing, guest, problem));
+      const paying = booking && boxOffice.showing(booking[1]);
+      if (paying) {
+        const held = boxOffice.booking(guest, paying.id);
+        if (!held) return back(res, `/show/${paying.id}`);
+        return page(res, p, 'Book', bookPage(p, paying, held, (url.searchParams.get('problem') ?? '').slice(0, 200)));
+      }
+      const ticketMatch = url.pathname.match(/^\/ticket\/([\w-]+)$/);
+      const ticket = ticketMatch && boxOffice.ticket(guest, ticketMatch[1]);
+      if (ticket) return page(res, p, 'Your ticket', ticketPage(ticket));
       send(res, 404, 'Not found');
     } catch (error) {
       console.error(error);
