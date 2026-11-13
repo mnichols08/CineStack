@@ -19,6 +19,18 @@ Choosing seats for a showing, paying for them, getting a ticket, and being let i
 - A page reads only what it shows: every showing's seats and holds, and the guest's own tickets. Bookings, payments and other guests' tickets (with their names and emails) never leave the server.
 - Every seat costs $11.00 for now. Price rules (adult, child, matinee, discount day, 3D) come in the prices milestone.
 
+## Try it
+
+`npm install`, then `npm start`, and open http://localhost:3000. Two browser windows side by side (one of them private, so it's another guest) show the live parts best.
+
+1. **Pick a showing** from Tonight. Tap a few seats. In the other window, open the same showing: your seats show as taken there, and change as you tap.
+2. **Book.** The bar under the map says what you hold and the total. Press **Book**, fill in a name and email, and pay with any card number (`4000 0000 0000 0002` is declined, to see that). You get a ticket with a QR code, and your seats are sold for everyone.
+3. **Find it again.** Your tickets are listed at the top of Tonight.
+4. **At the door.** In the other window, open **The door (staff)** from the footer and start a door shift. Type the code from the ticket's address (`/ticket/<code>`), or, on a phone, choose a photo and take one of the ticket. It says **Admit**, and the guest's ticket says **Used at** without a reload. Scan it again: **Already used**, with the time.
+5. **Without JavaScript** (turn it off in the browser's settings), seats are checkboxes with a button, and booking and the door work the same.
+
+Every seat is $11.00 for now. Prices, snacks, trailers, the lobby boards and the manager's admin are the next milestones (`plan/roadmap-theatre.md` in the planning project).
+
 ## How it is put together
 
 | Piece | Job |

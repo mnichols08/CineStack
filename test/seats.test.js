@@ -241,6 +241,13 @@ test('without JavaScript: hold seats, pay, and get a ticket; the seats are sold 
   assert.ok(await other.seat(a).isDisabled());
   // Someone else's ticket isn't theirs to see, and the paid booking can't be paid again.
   assert.equal((await other.context.request.get(url)).status(), 404);
+  // The buyer finds it again from the home page; nobody else sees it there.
+  await guest.page.goto(app.base);
+  assert.match(await guest.page.locator('.mine').innerText(), new RegExp(`Your tickets[\\s\\S]*Seats ${a}, ${b}`));
+  assert.equal(await guest.page.getAttribute('.mine a', 'href'), `/ticket/${key}`);
+  await other.page.goto(app.base);
+  assert.equal(await other.page.locator('.mine').count(), 0);
+  assert.equal(await other.page.getAttribute('.site-foot a[href="/staff/door"]', 'href'), '/staff/door', 'staff can find the door');
   await guest.page.goto(`${app.base}/book/${app.showing}`);
   assert.equal(guest.page.url(), app.base + app.path, 'nothing held: back to the seats');
   await guest.context.close();

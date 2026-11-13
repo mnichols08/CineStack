@@ -41,6 +41,12 @@ const STYLE = `
   .notice-text:empty { display: none; }
   .notice-text { margin: 0; color: #ffd9dc; }
   .start { font: inherit; font-weight: 700; padding: 0.7rem 1.2rem; border: 0; border-radius: 0.5rem; background: var(--accent); color: #1a1c22; cursor: pointer; }
+  .mine { display: grid; gap: 0.6rem; padding: 1rem 1.2rem; border-radius: 0.75rem; background: var(--card); box-shadow: 0 0 0 1px var(--accent); }
+  .mine h2 { margin: 0; font-size: 1.1rem; }
+  .mine ul { display: grid; gap: 0.4rem; margin: 0; padding: 0; list-style: none; }
+  .mine a { text-decoration: none; }
+  .mine a:hover strong { color: var(--accent); }
+  .site-foot { padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 2.5rem; color: var(--muted-foreground); font-size: 0.9rem; }
   .notice { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #4a1f24; color: #ffd9dc; }
 `;
 
@@ -60,6 +66,7 @@ export function layout({ title, theatre, body, actionsScript = '' }) {
   <main>
     ${body}
   </main>
+  <footer class="site-foot"><a href="/">Tonight</a> · <a href="/staff/door">The door (staff)</a></footer>
   ${actionsScript}
   <script type="module">
     import { connect } from '@zubra/sync/connect';
