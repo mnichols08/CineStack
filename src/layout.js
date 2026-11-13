@@ -48,6 +48,20 @@ const STYLE = `
   .mine a:hover strong { color: var(--accent); }
   .site-foot { padding: 1.5rem clamp(1rem, 4vw, 2.5rem) 2.5rem; color: var(--muted-foreground); font-size: 0.9rem; }
   .notice { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #4a1f24; color: #ffd9dc; }
+  /* The kit's staff pages: sign-in, links, people, passwords. */
+  .panel { display: grid; gap: 0.9rem; align-content: start; padding: 1.1rem 1.2rem; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+  .panel table { width: 100%; border-collapse: collapse; }
+  .panel td, .panel th { padding: 0.5rem 0.4rem; border-top: 1px solid var(--border); text-align: left; vertical-align: top; }
+  .panel .done { opacity: 0.55; }
+  .ok { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #183a26; color: #c9f2d8; }
+  .bulletin { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: var(--muted); }
+  .hint { margin: 0; color: var(--muted-foreground); font-size: 0.9rem; }
+  .row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .inline { display: inline; }
+  .panel label { display: grid; gap: 0.3rem; font-weight: 600; }
+  .panel input, .panel select { font: inherit; padding: 0.55rem 0.7rem; border-radius: 0.5rem; border: 1px solid var(--border); background: var(--muted); color: inherit; }
+  .panel button, .button { font: inherit; font-weight: 700; padding: 0.6rem 1.1rem; border: 0; border-radius: 0.5rem; background: var(--accent); color: #1a1c22; cursor: pointer; text-decoration: none; justify-self: start; }
+  .button.light { background: var(--muted); color: var(--foreground); padding: 0.3rem 0.7rem; }
 `;
 
 export function layout({ title, theatre, body, actionsScript = '' }) {

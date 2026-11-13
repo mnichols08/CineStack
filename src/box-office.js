@@ -135,6 +135,8 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
 
   return {
     sync,
+    // The log the server writes through, for the kit's staff accounts (never in a page's scope).
+    store,
     theatre,
     holdMs,
     seatCents: SEAT_CENTS,
