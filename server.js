@@ -16,6 +16,7 @@ import { createZubra } from '@zubra/server';
 import { createActions } from '@zubra/actions';
 import { createStaff } from '@potomac-solutions/kit/staff';
 import { staffPages } from '@potomac-solutions/kit/staff/pages';
+import { createNotices } from '@potomac-solutions/kit/notice';
 import { loadQr } from '@journey-to-code/symbology';
 import { createBoxOffice } from './src/box-office.js';
 import { sessions } from './src/session.js';
@@ -61,7 +62,10 @@ export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cines
     res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
   }
-  const back = (res, location) => (res.writeHead(303, { location }), res.end());
+  // A message in an address shows only if the server signed it (kit/notice), so a link can't put
+  // its own words in a page's alert.
+  const notices = createNotices({ secret });
+  const back = (res, location) => (res.writeHead(303, { location: notices.sign(location) }), res.end());
   const money = (cents) => `$${(cents / 100).toFixed(2)}`;
 
   /** A small urlencoded form, or null when it's bigger than any of CineStack's forms. */
@@ -115,7 +119,7 @@ ${p.render('door-scanner', { resultNow: result ?? {}, timeZone: boxOffice.theatr
 </section>`;
   }
   const page = (res, p, title, body) => send(res, 200, p.finish(layout({ title, theatre: boxOffice.theatre, body, actionsScript: actions.script() })));
-  const pages = staffPages({ staff, home: '/staff/door', business: boxOffice.theatre.name, secure: production, render: (res, title, body) => page(res, zubra.page(), title, body) });
+  const pages = staffPages({ staff, notices, proxies: Number(process.env.TRUST_PROXIES ?? 0), home: '/staff/door', business: boxOffice.theatre.name, secure: production, render: (res, title, body) => page(res, zubra.page(), title, body) });
 
   function home(p, guest) {
     const mine = boxOffice.ticketsFor(guest);
@@ -212,7 +216,7 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
       if (paying) {
         const held = boxOffice.booking(guest, paying.id);
         if (!held) return back(res, `/show/${paying.id}`);
-        return page(res, p, 'Book', bookPage(p, paying, held, (url.searchParams.get('problem') ?? '').slice(0, 200)));
+        return page(res, p, 'Book', bookPage(p, paying, held, notices.read(url).problem));
       }
       if (url.pathname === '/staff/door') {
         const who = staff.session(req);

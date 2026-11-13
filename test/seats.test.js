@@ -8,6 +8,13 @@ import { chromium } from 'playwright';
 import { createApp } from '../server.js';
 import { loadQr } from '@journey-to-code/symbology';
 
+// A redirect's location as words: the signature on its message (kit/notice) checked and taken off.
+const plain = (location) => {
+  location = String(location ?? '');
+  if (/[?&](problem|done)=/.test(location) && !location.startsWith('?')) assert.match(location, /&sig=[\w-]{22}/, `unsigned message: ${location}`);
+  return decodeURIComponent(location.replace(/&sig=[\w-]+/, '').replaceAll('+', ' '));
+};
+
 const dir = mkdtempSync(join(tmpdir(), 'cinestack-'));
 const errors = [];
 let browser;
@@ -78,7 +85,7 @@ async function phone(site, name, { javaScriptEnabled = true } = {}) {
   /** Post the payment form; where the server sends the guest. */
   const pay = async (form, headers = {}) => {
     const response = await context.request.post(`${site.base}/book/${site.showing}`, { form, headers, maxRedirects: 0 });
-    return { status: response.status(), location: decodeURIComponent(response.headers().location ?? '') };
+    return { status: response.status(), location: plain(response.headers().location ?? '') };
   };
   return { context, page, choose, checkout, pay, seat: (id) => page.locator(`input[name=seat][value=${id}]`) };
 }
