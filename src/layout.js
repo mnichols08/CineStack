@@ -37,6 +37,10 @@ const STYLE = `
   .ticket .seats { margin: 0; font-size: 1.15rem; }
   .ticket .qr { width: min(18rem, 100%); padding: 0.75rem; border-radius: 0.75rem; background: #fff; color: #000; }
   .ticket .qr svg { display: block; width: 100%; height: auto; }
+  .photo { display: inline-grid; gap: 0.35rem; font-weight: 600; }
+  .notice-text:empty { display: none; }
+  .notice-text { margin: 0; color: #ffd9dc; }
+  .start { font: inherit; font-weight: 700; padding: 0.7rem 1.2rem; border: 0; border-radius: 0.5rem; background: var(--accent); color: #1a1c22; cursor: pointer; }
   .notice { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #4a1f24; color: #ffd9dc; }
 `;
 

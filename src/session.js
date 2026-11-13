@@ -4,6 +4,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const COOKIE = 'cs_guest';
+const STAFF = 'cs_staff';
 
 export function sessions({ secret }) {
   const mac = (value) => createHmac('sha256', secret).update(value).digest('base64url');
@@ -24,8 +25,26 @@ export function sessions({ secret }) {
     return { id, pub: pub(id) };
   }
 
+  /** Whether this device is signed in for a door shift (a stand-in for staff accounts). */
+  function staff(cookieHeader = '') {
+    const raw = cookieHeader
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${STAFF}=`))
+      ?.slice(STAFF.length + 1);
+    if (!raw) return false;
+    const expected = Buffer.from(mac('staff:door'));
+    const given = Buffer.from(decodeURIComponent(raw));
+    return expected.length === given.length && timingSafeEqual(expected, given);
+  }
+
   return {
     read,
+    staff,
+    /** The door-shift cookie, for a device a member of staff signs in on. */
+    staffCookie: () => `${STAFF}=${encodeURIComponent(mac('staff:door'))}; Path=/; HttpOnly; SameSite=Lax; Max-Age=43200`,
+    /** Whether a fetch-style Request (an action) comes from a door-shift device. */
+    staffFromRequest: (request) => staff(request.headers.get('cookie') ?? ''),
     /** The guest on a fetch-style Request (actions, sync). */
     fromRequest: (request) => read(request.headers.get('cookie') ?? ''),
     /** The guest on a Node request; a new one gets a cookie through `setHeader`. */

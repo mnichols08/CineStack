@@ -291,6 +291,128 @@ test('a hold that runs out before paying books nothing', async () => {
   await guest.context.close();
 });
 
+/** A guest who has bought `count` seats in `row`: their phone, and the ticket's key. */
+async function ticketHolder(site, name, row, count = 1) {
+  const guest = await phone(site, name, { javaScriptEnabled: false });
+  for (const seat of freeSeats(site, count, row)) assert.equal((await guest.choose({ toggle: seat })).body.ok, true);
+  const paid = await guest.pay(await guest.checkout());
+  assert.match(paid.location, /^\/ticket\/b[a-z0-9]+$/);
+  return { ...guest, key: paid.location.split('/').pop() };
+}
+
+/** A door-shift device. */
+async function door(site, name, { javaScriptEnabled = true } = {}) {
+  const context = await browser.newContext({ javaScriptEnabled });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => errors.push(`${name}: ${error.message}`));
+  page.on('console', (message) => message.type() === 'error' && errors.push(`${name}: ${message.text()}`));
+  await page.goto(`${site.base}/staff/door`);
+  await page.click('button.start');
+  await page.waitForURL(`${site.base}/staff/door`);
+  if (javaScriptEnabled) await page.waitForFunction(() => customElements.get('door-scanner'));
+  const scan = async (ticket) => {
+    const response = await context.request.post(`${site.base}/_zb/action/door-scanner/scan`, { form: { ticket }, headers: { accept: 'application/json', 'sec-fetch-site': 'same-origin' } });
+    return response.json();
+  };
+  return { context, page, scan };
+}
+
+test("the door scans a ticket once, from a photo of it; the guest's ticket says so live", async () => {
+  const guest = await ticketHolder(app, 'at the door', 'J', 2);
+  const ticket = await browser.newPage({ storageState: await guest.context.storageState() });
+  ticket.on('pageerror', (error) => errors.push(`ticket: ${error.message}`));
+  await ticket.goto(`${app.base}/ticket/${guest.key}`);
+  await ticket.waitForFunction(() => customElements.get('ticket-status'));
+  await ticket.waitForTimeout(400); // the live stream open
+  assert.equal(await ticket.locator('ticket-status').innerText(), 'Show this at the door.');
+  const photo = await ticket.locator('.ticket .qr').screenshot();
+
+  // The door photographs the code; the page decodes it (symbology, in the browser) and scans it.
+  const staff = await door(app, 'door');
+  await staff.page.setInputFiles('#ticket-photo', { name: 'ticket.png', mimeType: 'image/png', buffer: photo });
+  const admit = staff.page.locator('door-scanner .admit');
+  await admit.waitFor({ timeout: 5000 });
+  assert.match(await admit.innerText(), /Admit 2[\s\S]*Auditorium 1[\s\S]*Seats J\d+, J\d+/);
+  assert.doesNotMatch(await admit.innerText(), /guest@example\.com|at the door/, 'the door sees the seats, not the guest');
+
+  // The guest's ticket follows, with no reload.
+  await ticket.locator('ticket-status .used').waitFor({ timeout: 5000 });
+  assert.match(await ticket.locator('ticket-status').innerText(), /^Used at \d{1,2}:\d{2} [AP]M$/);
+
+  // The same code again: refused, with when it was first used.
+  await staff.page.setInputFiles('#ticket-photo', { name: 'ticket.png', mimeType: 'image/png', buffer: photo });
+  const refused = staff.page.locator('door-scanner .refuse');
+  await refused.waitFor({ timeout: 5000 });
+  assert.match(await refused.innerText(), /Already used\.[\s\S]*First used at \d{1,2}:\d{2} [AP]M/);
+
+  // A photo with no code in it says so, and scans nothing.
+  await staff.page.setInputFiles('#ticket-photo', { name: 'blank.png', mimeType: 'image/png', buffer: await ticket.locator('h1').screenshot() });
+  await staff.page.locator('#photo-problem:has-text("No ticket code found")').waitFor({ timeout: 5000 });
+  await ticket.close();
+  await staff.context.close();
+  await guest.context.close();
+});
+
+test('only a door-shift device scans; two doors at once let a ticket in once', async () => {
+  const guest = await ticketHolder(app, 'two doors', 'K');
+  // Not on a shift: the action refuses, and the page offers to start one.
+  const outsider = await phone(app, 'outsider', { javaScriptEnabled: false });
+  const tried = await outsider.context.request.post(`${app.base}/_zb/action/door-scanner/scan`, { form: { ticket: guest.key }, headers: { accept: 'application/json', 'sec-fetch-site': 'same-origin' } });
+  assert.deepEqual(await tried.json(), { error: 'Start a door shift to scan tickets.' });
+  assert.match(await (await outsider.context.request.get(`${app.base}/staff/door`)).text(), /Start a door shift/);
+  assert.equal((await outsider.context.request.post(`${app.base}/staff/start`, { headers: { 'sec-fetch-site': 'cross-site' }, maxRedirects: 0 })).status(), 403);
+
+  const [a, b] = await Promise.all([door(app, 'door a'), door(app, 'door b')]);
+  const answers = await Promise.all([a.scan(guest.key), b.scan(guest.key)]);
+  assert.equal(answers.filter((answer) => answer.ok).length, 1, JSON.stringify(answers));
+  assert.equal(answers.filter((answer) => answer.error === 'Already used.').length, 1);
+  // The door's answer says what to let in, and nothing about who booked it.
+  assert.deepEqual(Object.keys(answers.find((answer) => answer.ok).admit).sort(), ['film', 'hall', 'seats', 'starts', 'ticket']);
+  assert.deepEqual(await a.scan('b0000000000'), { error: 'That isn’t one of our tickets.' });
+  assert.deepEqual(await a.scan('../../seats/x'), { error: 'That isn’t one of our tickets.' });
+  await Promise.all([a.context.close(), b.context.close(), outsider.context.close(), guest.context.close()]);
+});
+
+test('without JavaScript: the door types a code and sees the answer', async () => {
+  const guest = await ticketHolder(app, 'typed', 'L');
+  const staff = await door(app, 'door no-js', { javaScriptEnabled: false });
+  await staff.page.fill('door-scanner input[name=ticket]', guest.key);
+  await staff.page.click('door-scanner button[type=submit]');
+  await staff.page.waitForURL(`${app.base}/staff/door`);
+  assert.match(await staff.page.locator('door-scanner .admit').innerText(), /Admit 1/);
+  await staff.page.fill('door-scanner input[name=ticket]', guest.key);
+  await staff.page.click('door-scanner button[type=submit]');
+  assert.match(await staff.page.locator('door-scanner .refuse').innerText(), /Already used/);
+  await staff.context.close();
+  await guest.context.close();
+});
+
+test("a page reads the seats and its own tickets, never bookings, payments or anyone else's ticket", async () => {
+  const owner = await ticketHolder(app, 'reader', 'B');
+  const other = await phone(app, 'nosy', { javaScriptEnabled: false });
+  /** Everything a page is sent, following the cursor to the end. */
+  const pull = async (person, scope = '') => {
+    const all = [];
+    for (let since = 0, i = 0; i < 200; i++) {
+      const page = await (await person.context.request.get(`${app.base}/_zb/sync/pull?since=${encodeURIComponent(since)}${scope}`)).json();
+      all.push(...(page.changes ?? []));
+      if (!page.changes?.length || page.cursor === since) break;
+      since = page.cursor;
+    }
+    return all;
+  };
+  const theirs = await pull(owner);
+  const seen = await pull(other);
+  assert.ok(seen.some((change) => change.collection === 'seats'), 'the seats are public');
+  for (const change of seen) assert.ok(['seats', 'holds'].includes(change.collection), `${change.collection} isn't sent to another guest`);
+  assert.deepEqual([...new Set(theirs.map((change) => change.collection))].sort(), ['holds', 'seats', 'tickets']);
+  assert.deepEqual([...new Set(theirs.filter((change) => change.collection === 'tickets').map((change) => change.key))], [owner.key], 'only their own ticket');
+  // A page can't widen it by asking.
+  assert.deepEqual(await pull(other, `&scope=${encodeURIComponent(JSON.stringify({ tickets: true, bookings: true, payments: true }))}`), []);
+  await owner.context.close();
+  await other.context.close();
+});
+
 test('guests cannot write seats themselves, and the server code stays on the server', async () => {
   const guest = await phone(app, 'writer', { javaScriptEnabled: false });
   const push = await guest.context.request.post(`${app.base}/_zb/sync/push`, {

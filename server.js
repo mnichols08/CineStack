@@ -8,6 +8,7 @@
 // - Holding, paying and the ticket are the Potomac kit's reserve, pay and stages; the payment
 //   page is the kit's checkout-form, from the package. The ticket's QR code is symbology's.
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createZubra } from '@zubra/server';
@@ -19,6 +20,17 @@ import { layout, escape } from './src/layout.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const components = join(here, 'src', 'components');
+
+/** The door's camera script and symbology's decoder, which the door page loads. */
+function files() {
+  // The package exports its WebAssembly file; its loader sits beside it.
+  const symbology = dirname(fileURLToPath(import.meta.resolve('@journey-to-code/symbology/symbology.wasm')));
+  return new Map([
+    ['/scripts/door.js', ['text/javascript; charset=utf-8', readFileSync(join(here, 'src', 'door.js'))]],
+    ['/vendor/symbology/qr.js', ['text/javascript; charset=utf-8', readFileSync(join(symbology, 'qr.js'))]],
+    ['/vendor/symbology/symbology.wasm', ['application/wasm', readFileSync(join(symbology, 'symbology.wasm'))]],
+  ]);
+}
 
 const time = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
@@ -33,8 +45,10 @@ export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cines
   const qr = await loadQr();
   const actions = await createActions({
     components,
-    context: ({ request }) => ({ boxOffice, guest: session.fromRequest(request) }),
+    context: ({ request }) => ({ boxOffice, guest: session.fromRequest(request), staff: session.staffFromRequest(request) }),
   });
+  boxOffice.identify((request) => session.fromRequest(request));
+  const served = files();
 
   function send(res, status, html) {
     res.writeHead(status, { 'content-type': 'text/html; charset=utf-8' });
@@ -65,11 +79,23 @@ export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cines
 ${p.render('checkout-form', { cart, place: `/book/${showing.id}`, checkout: booking.key, problem, testMode: true })}`;
   }
 
+  /** The door: scan a ticket's code, from a photo or typed. For a door-shift device. */
+  function doorPage(p, result) {
+    return `<section>
+  <h1>Door</h1>
+  <p class="lede">Scan each ticket once. A ticket that has been used says when.</p>
+</section>
+<label class="photo">Scan with the camera <input type="file" id="ticket-photo" accept="image/*" capture="environment"></label>
+<p id="photo-problem" class="notice-text" role="alert"></p>
+${p.render('door-scanner', { resultNow: result ?? {}, timeZone: boxOffice.theatre.timeZone })}
+<script type="module" src="/scripts/door.js"></script>`;
+  }
+
   /**
    * A ticket: what it's for, and the code the door scans. The code is the ticket's key, which is
    * all the door needs to look it up, and carries no address that could be wrong for the host.
    */
-  function ticketPage(ticket) {
+  function ticketPage(p, ticket) {
     const code = qr.svg(qr.encode(ticket.key), { title: `Ticket ${ticket.key}` });
     return `<section class="ticket">
   <p class="tag">Ticket · test mode</p>
@@ -77,7 +103,8 @@ ${p.render('checkout-form', { cart, place: `/book/${showing.id}`, checkout: book
   <p class="lede">${time(ticket.showing.starts)} · ${escape(ticket.hall.name)}</p>
   <p class="seats">${ticket.units.length === 1 ? 'Seat' : 'Seats'} <strong>${escape(ticket.units.join(', '))}</strong> · ${money(ticket.cents)}</p>
   <div class="qr">${code}</div>
-  <p class="lede">Show this at the door.${ticket.name ? ` Booked by ${escape(ticket.name)}.` : ''}</p>
+  ${p.render('ticket-status', { ticket: ticket.key, statusNow: ticket.status, scannedNow: ticket.scanned ?? 0, timeZone: boxOffice.theatre.timeZone })}
+  ${ticket.name ? `<p class="lede">Booked by ${escape(ticket.name)}.</p>` : ''}
 </section>`;
   }
   const page = (res, p, title, body) => send(res, 200, p.finish(layout({ title, theatre: boxOffice.theatre, body, actionsScript: actions.script() })));
@@ -125,6 +152,18 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
       if (zubra.handle(req, res)) return;
       const url = new URL(req.url, 'http://localhost');
       if (url.pathname === '/favicon.ico') return res.writeHead(204).end();
+      const file = served.get(url.pathname);
+      if (file) {
+        res.writeHead(200, { 'content-type': file[0], 'cache-control': 'public, max-age=3600' });
+        return res.end(file[1]);
+      }
+
+      // Staff accounts come later: for the prototype, a device starts a door shift here.
+      if (url.pathname === '/staff/start' && req.method === 'POST') {
+        if (req.headers['sec-fetch-site'] === 'cross-site') return send(res, 403, 'Forbidden');
+        res.writeHead(303, { location: '/staff/door', 'set-cookie': session.staffCookie() });
+        return res.end();
+      }
 
       // Paying for held seats: the kit's checkout-form posts here. A post another site sends is
       // refused (the guest cookie is SameSite=Lax as well).
@@ -158,9 +197,15 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
         if (!held) return back(res, `/show/${paying.id}`);
         return page(res, p, 'Book', bookPage(p, paying, held, (url.searchParams.get('problem') ?? '').slice(0, 200)));
       }
+      if (url.pathname === '/staff/door') {
+        if (!session.staff(req.headers.cookie ?? '')) {
+          return page(res, p, 'Door', `<section><h1>Door</h1><p class="lede">This page is for the door. Staff accounts come later; for the concept, any device can start a shift.</p></section><form method="post" action="/staff/start"><button class="start" type="submit">Start a door shift</button></form>`);
+        }
+        return page(res, p, 'Door', doorPage(p, result?.value ?? (result?.error ? { error: 'That didn’t go through. Try again.' } : null)));
+      }
       const ticketMatch = url.pathname.match(/^\/ticket\/([\w-]+)$/);
       const ticket = ticketMatch && boxOffice.ticket(guest, ticketMatch[1]);
-      if (ticket) return page(res, p, 'Your ticket', ticketPage(ticket));
+      if (ticket) return page(res, p, 'Your ticket', ticketPage(p, ticket));
       send(res, 404, 'Not found');
     } catch (error) {
       console.error(error);
