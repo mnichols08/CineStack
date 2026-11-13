@@ -11,12 +11,12 @@
   },
   "dependencies": {
     "@journey-to-code/symbology": "0.2.0",
-    "@potomac-solutions/kit": "github:Potomac-Solutions/kit#2254343f31b034c331e10ff418269313bf0d3b40",
-    "@zubra/actions": "5.13.0",
-    "@zubra/compiler": "5.13.0",
-    "@zubra/runtime": "5.13.0",
-    "@zubra/server": "5.13.0",
-    "@zubra/sync": "5.13.0"
+    "@potomac-solutions/kit": "github:Potomac-Solutions/kit#2418c3ce77c984347c617016c928208b40de5fb1",
+    "@zubra/actions": "5.13.1",
+    "@zubra/compiler": "5.13.1",
+    "@zubra/runtime": "5.13.1",
+    "@zubra/server": "5.13.1",
+    "@zubra/sync": "5.13.1"
   },
   "devDependencies": {
     "playwright": "1.63.0"

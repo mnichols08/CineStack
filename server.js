@@ -7,12 +7,15 @@
 //   without JavaScript. The box office (src/box-office.js) decides who gets a seat.
 // - Holding, paying and the ticket are the Potomac kit's reserve, pay and stages; the payment
 //   page is the kit's checkout-form, from the package. The ticket's QR code is symbology's.
+// - The people who work the door are the kit's staff accounts: an owner, and the staff they invite.
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createZubra } from '@zubra/server';
 import { createActions } from '@zubra/actions';
+import { createStaff } from '@potomac-solutions/kit/staff';
+import { staffPages } from '@potomac-solutions/kit/staff/pages';
 import { loadQr } from '@journey-to-code/symbology';
 import { createBoxOffice } from './src/box-office.js';
 import { sessions } from './src/session.js';
@@ -34,18 +37,22 @@ function files() {
 
 const time = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cinestack.db'), cache = true, secret = process.env.SESSION_SECRET, holdMs, sweepMs } = {}) {
+export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cinestack.db'), cache = true, secret = process.env.SESSION_SECRET, holdMs, sweepMs, staffCost } = {}) {
   if (!secret) {
     if (process.env.NODE_ENV === 'production') throw new Error('Set SESSION_SECRET.');
     secret = 'cinestack-development-only';
   }
   const boxOffice = createBoxOffice({ db, holdMs, sweepMs });
   const session = sessions({ secret });
+  // The theatre's people, in its own log; sign-in, links, people and passwords are the kit's pages.
+  const production = process.env.NODE_ENV === 'production';
+  const staff = createStaff({ store: boxOffice.store, secure: production, ...(staffCost ? { cost: staffCost } : {}) });
+  const onShift = (from) => staff.can(staff.session(from), 'staff');
   const zubra = createZubra({ components, cache, packages: ['@potomac-solutions/kit/components'] });
   const qr = await loadQr();
   const actions = await createActions({
     components,
-    context: ({ request }) => ({ boxOffice, guest: session.fromRequest(request), staff: session.staffFromRequest(request) }),
+    context: ({ request }) => ({ boxOffice, guest: session.fromRequest(request), staff: onShift(request) }),
   });
   boxOffice.identify((request) => session.fromRequest(request));
   const served = files();
@@ -108,6 +115,7 @@ ${p.render('door-scanner', { resultNow: result ?? {}, timeZone: boxOffice.theatr
 </section>`;
   }
   const page = (res, p, title, body) => send(res, 200, p.finish(layout({ title, theatre: boxOffice.theatre, body, actionsScript: actions.script() })));
+  const pages = staffPages({ staff, home: '/staff/door', business: boxOffice.theatre.name, secure: production, render: (res, title, body) => page(res, zubra.page(), title, body) });
 
   function home(p, guest) {
     const mine = boxOffice.ticketsFor(guest);
@@ -164,11 +172,13 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
         return res.end(file[1]);
       }
 
-      // Staff accounts come later: for the prototype, a device starts a door shift here.
-      if (url.pathname === '/staff/start' && req.method === 'POST') {
+      // Sign-in, links, people and passwords: the kit's staff pages. Another site's post is refused.
+      if (url.pathname.startsWith('/staff/') && req.method === 'POST') {
         if (req.headers['sec-fetch-site'] === 'cross-site') return send(res, 403, 'Forbidden');
-        res.writeHead(303, { location: '/staff/door', 'set-cookie': session.staffCookie() });
-        return res.end();
+        const form = await readForm(req);
+        if (!form) return send(res, 413, 'Too large');
+        if (await pages.handle(req, res, url, form)) return;
+        return send(res, 404, 'Not found');
       }
 
       // Paying for held seats: the kit's checkout-form posts here. A post another site sends is
@@ -187,6 +197,7 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
         return res.end('ok');
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, 'Method not allowed');
+      if (await pages.handle(req, res, url, null)) return;
       const guest = session.ensure(req, res);
       // Without JavaScript, an action's answer comes back once in a cookie.
       const result = actions.result(req, (name, value) => res.appendHeader(name, value));
@@ -204,10 +215,9 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
         return page(res, p, 'Book', bookPage(p, paying, held, (url.searchParams.get('problem') ?? '').slice(0, 200)));
       }
       if (url.pathname === '/staff/door') {
-        if (!session.staff(req.headers.cookie ?? '')) {
-          return page(res, p, 'Door', `<section><h1>Door</h1><p class="lede">This page is for the door. Staff accounts come later; for the concept, any device can start a shift.</p></section><form method="post" action="/staff/start"><button class="start" type="submit">Start a door shift</button></form>`);
-        }
-        return page(res, p, 'Door', doorPage(p, result?.value ?? (result?.error ? { error: 'That didn’t go through. Try again.' } : null)));
+        const who = staff.session(req);
+        if (!staff.can(who, 'staff')) return page(res, p, 'Sign in', pages.signIn(url));
+        return page(res, p, 'Door', pages.bar(who) + doorPage(p, result?.value ?? (result?.error ? { error: 'That didn’t go through. Try again.' } : null)));
       }
       const ticketMatch = url.pathname.match(/^\/ticket\/([\w-]+)$/);
       const ticket = ticketMatch && boxOffice.ticket(guest, ticketMatch[1]);
@@ -221,11 +231,12 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
   });
 
   server.on('close', () => boxOffice.close());
-  return Object.assign(server, { boxOffice });
+  return Object.assign(server, { boxOffice, staff });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 3000);
   const server = await createApp();
   server.listen(port, '0.0.0.0', () => console.log(`CineStack on http://localhost:${port}`));
+  if (server.staff.needsOwner()) console.log(`Set up the first owner (works once, for a day): http://localhost:${port}/staff/accept?token=${await server.staff.setup()}`);
 }

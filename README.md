@@ -15,7 +15,7 @@ Choosing seats for a showing, paying for them, getting a ticket, and being let i
 - Held seats show a **Book** button with the total. Paying is one form (test mode: no money moves; card `4000 0000 0000 0002` is declined). Once paid, the seats are sold for everyone, and the guest gets a ticket page with a QR code for the door.
 - A declined card books nothing and keeps the seats held, to try another card. A hold that runs out before paying books nothing.
 - **The door** (`/staff/door`) scans a ticket once. A photo of the ticket's code (on a phone, the photo picker opens the camera) is decoded in the browser by symbology's WebAssembly decoder, or the code can be typed, with or without JavaScript. The door sees what to let in: the film, time, auditorium and seats, never who booked. A second scan says when the ticket was first used, and two doors scanning at the same moment let it in once. The guest's ticket page shows "Used at 7:41 PM" as it happens.
-- Staff accounts come later. For the concept, any device can start a door shift (a signed cookie).
+- **Staff accounts** are the Potomac kit's `staff` and `staff/pages`. A new theatre prints a one-time link for its first owner when the server starts; the owner invites the rest from **People**, with a link for each that works once. Passwords are hashed with scrypt, sessions can be ended, five wrong passwords lock an email for fifteen minutes, and none of it is ever in a page's Sync scope.
 - A page reads only what it shows: every showing's seats and holds, and the guest's own tickets. Bookings, payments and other guests' tickets (with their names and emails) never leave the server.
 - Every seat costs $11.00 for now. Price rules (adult, child, matinee, discount day, 3D) come in the prices milestone.
 
@@ -26,7 +26,7 @@ Choosing seats for a showing, paying for them, getting a ticket, and being let i
 1. **Pick a showing** from Tonight. Tap a few seats. In the other window, open the same showing: your seats show as taken there, and change as you tap.
 2. **Book.** The bar under the map says what you hold and the total. Press **Book**, fill in a name and email, and pay with any card number (`4000 0000 0000 0002` is declined, to see that). You get a ticket with a QR code, and your seats are sold for everyone.
 3. **Find it again.** Your tickets are listed at the top of Tonight.
-4. **At the door.** In the other window, open **The door (staff)** from the footer and start a door shift. Type the code from the ticket's address (`/ticket/<code>`), or, on a phone, choose a photo and take one of the ticket. It says **Admit**, and the guest's ticket says **Used at** without a reload. Scan it again: **Already used**, with the time.
+4. **At the door.** In the other window, open **The door (staff)** from the footer and sign in with the owner account (set it up from the link the server printed at start). Type the code from the ticket's address (`/ticket/<code>`), or, on a phone, choose a photo and take one of the ticket. It says **Admit**, and the guest's ticket says **Used at** without a reload. Scan it again: **Already used**, with the time.
 5. **Without JavaScript** (turn it off in the browser's settings), seats are checkboxes with a button, and booking and the door work the same.
 
 Every seat is $11.00 for now. Prices, snacks, trailers, the lobby boards and the manager's admin are the next milestones (`plan/roadmap-theatre.md` in the planning project).

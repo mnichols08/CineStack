@@ -14,8 +14,15 @@ let browser;
 let app; // five-minute holds
 let quick; // holds that run out in a second and a half, to watch expiry
 
+// The theatre's owner, set up through the one-time link a new theatre starts with. Cheap hashing,
+// so the tests don't spend their time in scrypt.
+const OWNER = { email: 'owner@example.com', name: 'Test Owner', password: 'test owner password' };
+const COST = { N: 2 ** 10, r: 8, p: 1 };
+
 async function start(name, options = {}) {
-  const server = await createApp({ db: join(dir, `${name}.db`), cache: false, secret: 'test', ...options });
+  const server = await createApp({ db: join(dir, `${name}.db`), cache: false, secret: 'test', staffCost: COST, ...options });
+  const made = await server.staff.accept(await server.staff.setup(), OWNER);
+  if (!made.ok) throw new Error(made.error);
   await new Promise((done) => server.listen(0, done));
   const base = `http://localhost:${server.address().port}`;
   // Auditorium 1 is the big room (220 seats); its first showing is the one under test.
@@ -307,14 +314,16 @@ async function ticketHolder(site, name, row, count = 1) {
   return { ...guest, key: paid.location.split('/').pop() };
 }
 
-/** A door-shift device. */
+/** A device someone with an account has signed in on, at the door. */
 async function door(site, name, { javaScriptEnabled = true } = {}) {
   const context = await browser.newContext({ javaScriptEnabled });
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(`${name}: ${error.message}`));
   page.on('console', (message) => message.type() === 'error' && errors.push(`${name}: ${message.text()}`));
   await page.goto(`${site.base}/staff/door`);
-  await page.click('button.start');
+  await page.fill('input[name=email]', OWNER.email);
+  await page.fill('input[name=password]', OWNER.password);
+  await page.click('form[action="/staff/sign-in"] button[type=submit]');
   await page.waitForURL(`${site.base}/staff/door`);
   if (javaScriptEnabled) await page.waitForFunction(() => customElements.get('door-scanner'));
   const scan = async (ticket) => {
@@ -360,14 +369,21 @@ test("the door scans a ticket once, from a photo of it; the guest's ticket says 
   await guest.context.close();
 });
 
-test('only a door-shift device scans; two doors at once let a ticket in once', async () => {
+test('only someone signed in scans; two doors at once let a ticket in once', async () => {
   const guest = await ticketHolder(app, 'two doors', 'K');
   // Not on a shift: the action refuses, and the page offers to start one.
   const outsider = await phone(app, 'outsider', { javaScriptEnabled: false });
   const tried = await outsider.context.request.post(`${app.base}/_zb/action/door-scanner/scan`, { form: { ticket: guest.key }, headers: { accept: 'application/json', 'sec-fetch-site': 'same-origin' } });
-  assert.deepEqual(await tried.json(), { error: 'Start a door shift to scan tickets.' });
-  assert.match(await (await outsider.context.request.get(`${app.base}/staff/door`)).text(), /Start a door shift/);
-  assert.equal((await outsider.context.request.post(`${app.base}/staff/start`, { headers: { 'sec-fetch-site': 'cross-site' }, maxRedirects: 0 })).status(), 403);
+  assert.deepEqual(await tried.json(), { error: 'Sign in to scan tickets.' });
+  const doorPage = await (await outsider.context.request.get(`${app.base}/staff/door`)).text();
+  assert.match(doorPage, /action="\/staff\/sign-in"/, 'the door asks for a sign-in');
+  assert.doesNotMatch(doorPage, /door-scanner/, 'and shows no scanner');
+  // The old shift button is gone, a wrong password gets nobody in, and another site can't post.
+  assert.equal((await outsider.context.request.post(`${app.base}/staff/start`, { headers: { 'sec-fetch-site': 'same-origin' }, maxRedirects: 0 })).status(), 404);
+  const wrong = await outsider.context.request.post(`${app.base}/staff/sign-in`, { form: { email: OWNER.email, password: 'not the password' }, headers: { 'sec-fetch-site': 'same-origin' }, maxRedirects: 0 });
+  assert.doesNotMatch(wrong.headers()['set-cookie'] ?? '', /staff/, 'no staff session for a wrong password');
+  assert.deepEqual(await (await outsider.context.request.post(`${app.base}/_zb/action/door-scanner/scan`, { form: { ticket: guest.key }, headers: { accept: 'application/json', 'sec-fetch-site': 'same-origin' } })).json(), { error: 'Sign in to scan tickets.' });
+  assert.equal((await outsider.context.request.post(`${app.base}/staff/sign-in`, { form: { email: OWNER.email, password: OWNER.password }, headers: { 'sec-fetch-site': 'cross-site' }, maxRedirects: 0 })).status(), 403);
 
   const [a, b] = await Promise.all([door(app, 'door a'), door(app, 'door b')]);
   const answers = await Promise.all([a.scan(guest.key), b.scan(guest.key)]);

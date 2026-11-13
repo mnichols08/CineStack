@@ -13,7 +13,7 @@
 
   export async function scan(formData, context) {
     'use server'
-    if (!context.staff) return { error: 'Start a door shift to scan tickets.' }
+    if (!context.staff) return { error: 'Sign in to scan tickets.' }
     return context.boxOffice.scan(formData.get('ticket'))
   }
 
