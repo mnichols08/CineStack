@@ -41,3 +41,11 @@ npm test         # needs Chrome or Playwright's Chromium
 ```
 
 Node 22.13 or later. `SESSION_SECRET` is required in production; `DATA_DIR` says where the database file goes.
+
+Relative component imports work on Windows from Zubra 5.10.2 (the compiler keyed them by `/` paths only; CineStack patched it until the fix shipped).
+
+To check every showing link and its seat components without a browser:
+
+```sh
+node --test test/navigation.test.js
+```
