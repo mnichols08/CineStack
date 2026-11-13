@@ -6,13 +6,18 @@
 //
 //   seats/<showing>/<seat>   { state: 'held' | 'sold' | 'free', by, until }
 //   holds/<showing>/<guest>  { seats: [...], until }      the guest's own summary
+//   bookings/<key>           the kit's `reserve` draft: seats held at a showing, priced, then paid
+//   tickets/<key>            a paid booking, from the kit's `stages`: booked, then scanned at the door
 //
 // `by` and <guest> are the guest's public name (session.js), never their cookie id.
 import { createHash } from 'node:crypto';
 import { createSyncServer } from '@zubra/sync/server';
 import { createHolds } from '@potomac-solutions/kit/hold';
+import { createReserve } from '@potomac-solutions/kit/reserve';
+import { createPay, testProvider } from '@potomac-solutions/kit/pay';
+import { createStages } from '@potomac-solutions/kit/stages';
 import { fieldLog } from './log.js';
-import { theatre, auditoriums, films, showings as seedShowings } from './seed.js';
+import { theatre, auditoriums, films, showings as seedShowings, SEAT_CENTS } from './seed.js';
 
 const pad = (number, width) => String(number).padStart(width, '0');
 
@@ -82,6 +87,28 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
   });
   const { taken, sweep } = holds;
 
+  // Booking is the kit's `reserve`: the seats a guest holds at a showing are a draft, priced;
+  // booking pays for it once (the kit's test provider: no money moves) and confirms the seats
+  // as sold. A paid booking is a ticket, which the door will scan (`stages`).
+  const store = { get: log.get, under: log.under, write };
+  const tickets = createStages({ store, collection: 'tickets', steps: ['booked', 'scanned'] });
+  const reserve = createReserve({
+    store,
+    holds,
+    pay: createPay({ provider: testProvider(), store }),
+    stages: tickets,
+    base: SEAT_CENTS,
+    pools: (pool) => showings.has(pool),
+  });
+
+  /** The guest's booking in progress at a showing (held, or tried and declined), or null. */
+  const draft = (guest, showing) =>
+    log
+      .under('bookings')
+      .filter((booking) => booking.holder === guest.pub && booking.pools?.[0] === showing && (booking.state === 'held' || booking.state === 'failed'))
+      .sort((a, b) => b.at - a.at)[0] ?? null;
+  const bookingKey = () => `b${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+
   // A fresh theatre has a few seats already sold in each showing, so the map looks lived in.
   if (!log.size) {
     for (const showing of showings.values()) {
@@ -97,6 +124,7 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
     sync,
     theatre,
     holdMs,
+    seatCents: SEAT_CENTS,
     sweep,
     showings: () => [...showings.values()],
     showing: (id) => showings.get(id) ?? null,
@@ -120,15 +148,62 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
       const showing = showings.get(String(formData.get('showing') ?? ''));
       if (!showing) return { error: 'That showing is gone.' };
       const toggle = String(formData.get('toggle') ?? '');
-      const asked = toggle ? { toggle } : { units: formData.getAll('seat') };
-      const answer = await holds.choose(guest.pub, showing.id, asked, { valid: seatIds.get(showing.auditorium) });
+      const had = holds.held(guest.pub, showing.id).units;
+      const units = toggle ? (had.includes(toggle) ? had.filter((seat) => seat !== toggle) : [...had, toggle]) : formData.getAll('seat').map(String);
+      const before = draft(guest, showing.id);
+      if (!units.length) {
+        // Nothing chosen: let go of the draft's seats (or of a hold with no draft behind it).
+        if (before) await reserve.release(guest.pub, before.key);
+        else await holds.choose(guest.pub, showing.id, { units: [] });
+        return { ok: true, seats: [], until: 0 };
+      }
+      const answer = await reserve.hold(guest.pub, { key: before?.key ?? bookingKey(), pools: [showing.id], units, valid: seatIds.get(showing.auditorium) });
       if (answer.ok) return { ok: true, seats: answer.units, until: answer.until };
       const words = {
         unknown: 'No such seat.',
         limit: `You can hold up to ${MAX_SEATS} seats at once.`,
         taken: `Seat ${answer.unit} was just taken.`,
+        'in-progress': 'Your booking is going through. Wait a moment.',
       };
       return { error: words[answer.error] ?? 'Those seats could not be held.', seat: answer.unit ?? '' };
+    },
+
+    /** The guest's draft at a showing, ready to pay for: seats, lines and total. Null if none. */
+    booking(guest, showing) {
+      const found = draft(guest, showing);
+      return found && found.units?.length ? found : null;
+    },
+
+    /**
+     * Pay for the guest's held seats. Once paid, they're sold and the booking is a ticket. A
+     * declined card books nothing; the seats stay held while the hold lasts, to try again.
+     */
+    async book(guest, showingId, form) {
+      if (!guest) return { error: 'Open the showing again to choose seats.' };
+      const showing = showings.get(showingId);
+      const found = showing && draft(guest, showing.id);
+      if (!found || String(form.get('checkout') ?? '') !== found.key) return { error: 'Your seats aren’t held any more. Choose them again.' };
+      const done = await reserve.book(guest.pub, found.key, {
+        method: { card: String(form.get('card') ?? '') },
+        fields: { showing: showing.id, name: String(form.get('name') ?? '').trim().slice(0, 100), email: String(form.get('email') ?? '').trim().slice(0, 200) },
+        description: 'CineStack tickets (test mode)',
+      });
+      if (done.ok) return { ok: true, ticket: found.key };
+      const words = {
+        declined: 'That card was declined. Try another.',
+        lapsed: 'Your hold ran out and a seat went to someone else. Choose your seats again.',
+        'in-progress': 'Your booking is already going through.',
+        'lapsed-after-payment': 'Your hold ran out while the payment went through. The theatre will refund it.',
+      };
+      return { error: words[done.error] ?? 'That didn’t go through. Try again.' };
+    },
+
+    /** A ticket the guest owns, with what it's for, or null. */
+    ticket(guest, key) {
+      const record = log.get('tickets', key);
+      if (!record || !guest || record.holder !== guest.pub) return null;
+      const showing = showings.get(record.showing);
+      return { key, ...record, showing, film: filmsById.get(showing?.film), hall: halls.get(showing?.auditorium) };
     },
 
     close() {
