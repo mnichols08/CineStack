@@ -33,3 +33,14 @@ npm test         # needs Chrome or Playwright's Chromium
 ```
 
 Node 22.13 or later. `SESSION_SECRET` is required in production; `DATA_DIR` says where the database file goes.
+
+`npm install` also applies the patch in `patches/` to Zubra's compiler: source keys use
+forward slashes so relative component imports resolve on Windows as well as Unix.
+Keep install scripts enabled; a patch failure stops installation rather than leaving
+showing pages broken.
+
+To check every showing link and its seat components without a browser:
+
+```sh
+node --test test/navigation.test.js
+```
