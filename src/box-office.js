@@ -232,6 +232,19 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
       return { error: 'That ticket can’t be scanned.' };
     },
 
+    /** The guest's tickets, soonest showing first, with what each is for. */
+    ticketsFor(guest) {
+      if (!guest) return [];
+      return log
+        .under('tickets')
+        .filter((record) => record.holder === guest.pub && showings.has(record.showing))
+        .map((record) => {
+          const showing = showings.get(record.showing);
+          return { ...record, showing, film: filmsById.get(showing.film), hall: halls.get(showing.auditorium) };
+        })
+        .sort((a, b) => a.showing.starts - b.showing.starts);
+    },
+
     /** A ticket the guest owns, with what it's for, or null. */
     ticket(guest, key) {
       const record = log.get('tickets', key);

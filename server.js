@@ -109,7 +109,13 @@ ${p.render('door-scanner', { resultNow: result ?? {}, timeZone: boxOffice.theatr
   }
   const page = (res, p, title, body) => send(res, 200, p.finish(layout({ title, theatre: boxOffice.theatre, body, actionsScript: actions.script() })));
 
-  function home(p) {
+  function home(p, guest) {
+    const mine = boxOffice.ticketsFor(guest);
+    const tickets = mine.length
+      ? `<section class="mine"><h2>Your tickets</h2><ul>${mine
+          .map((ticket) => `<li><a href="/ticket/${ticket.key}"><strong>${escape(ticket.film.title)}</strong> ${time(ticket.showing.starts)} · ${escape(ticket.hall.name)} · ${ticket.units.length === 1 ? 'Seat' : 'Seats'} ${escape(ticket.units.join(', '))}${ticket.status === 'scanned' ? ' · used' : ''}</a></li>`)
+          .join('')}</ul></section>`
+      : '';
     const byFilm = new Map();
     for (const showing of boxOffice.showings()) {
       if (!byFilm.has(showing.film)) byFilm.set(showing.film, []);
@@ -123,7 +129,7 @@ ${p.render('door-scanner', { resultNow: result ?? {}, timeZone: boxOffice.theatr
         .join('');
       return `<li class="film">${film.label ? `<span class="tag">${escape(film.label)}</span>` : ''}<h2>${escape(film.title)}</h2><p>${escape(film.rating)} · ${film.minutes} min</p><ul class="times">${times}</ul></li>`;
     });
-    return `<section><h1>Tonight</h1><p class="lede">Pick a time to choose your seats.</p></section><ul class="films">${cards.join('')}</ul>`;
+    return `${tickets}<section><h1>Tonight</h1><p class="lede">Pick a time to choose your seats.</p></section><ul class="films">${cards.join('')}</ul>`;
   }
 
   function show(p, showing, guest, problem) {
@@ -187,7 +193,7 @@ ${p.render('seat-chart', { showing: showing.id, me: guest.pub, rows, seatsNow: h
       const problem = result?.value?.error ?? (result?.error ? 'That didn’t go through. Try again.' : '');
       const p = zubra.page();
 
-      if (url.pathname === '/') return page(res, p, 'Tonight', home(p));
+      if (url.pathname === '/') return page(res, p, 'Tonight', home(p, guest));
       const match = url.pathname.match(/^\/show\/([\w-]+)$/);
       const showing = match && boxOffice.showing(match[1]);
       if (showing) return page(res, p, boxOffice.film(showing.film).title, show(p, showing, guest, problem));
