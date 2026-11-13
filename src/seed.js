@@ -30,6 +30,7 @@ export const theatre = {
   name: 'Garrett 8 Cinemas',
   town: 'Deep Creek Lake, Maryland',
   address: '19741 Garrett Highway, Deep Creek Lake, MD 21550',
+  timeZone: 'America/New_York',
   concept: 'Concept for Garrett 8 Cinemas by Potomac Solutions. Not the theatre’s website; nothing here is really for sale.',
 };
 

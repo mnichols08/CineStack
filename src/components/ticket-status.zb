@@ -1,0 +1,24 @@
+<!--
+  Whether a ticket has been used, live. The ticket is a Sync document ('use collection tickets by
+  ticket') only the server writes; the page may read it because it's this guest's own (the
+  server's scope). When the door scans it, the guest's ticket page says so without a reload.
+-->
+<script>
+  'use collection tickets by ticket'
+  import { from } from '@zubra/runtime'
+
+  let status = from(statusNow)
+  let scanned = from(scannedNow)
+
+  const at = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone })
+</script>
+<style>
+  :host { display: block; }
+  p { margin: 0; }
+  .used { display: inline-block; padding: 0.35rem 0.75rem; border-radius: 999px; background: #12452b; color: #d8f5e3; font-weight: 700; }
+  .ready { color: var(--muted-foreground, #9299ab); }
+</style>
+<ticket-status ticket="" status-now="booked" scanned-now={0} time-zone="America/New_York">
+  <p class="used" zb-if={status === 'scanned'}>Used at {at(scanned)}</p>
+  <p class="ready" zb-if={status !== 'scanned'}>Show this at the door.</p>
+</ticket-status>

@@ -49,8 +49,20 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
   // The server's own pushes go through the Sync server so they reach the live streams. Only they
   // may write; membership of a WeakSet of Request objects can't be forged by a client.
   const internal = new WeakSet();
+  // Who is asking, from a request: the server (server.js) says how. Until then, nobody.
+  let who = () => null;
+  const ticketsOf = (pub) => log.under('tickets').filter((ticket) => ticket.holder === pub).map((ticket) => ticket.key);
+
   const sync = createSyncServer({
     log,
+    // What a page may read: every showing's seats and holds (that's the point of a live map),
+    // and the guest's own tickets. Bookings, payments and other guests' tickets (names, emails)
+    // never leave the server.
+    scope({ request }) {
+      if (internal.has(request)) return null; // the server's own writes: everything
+      const mine = who(request) ? ticketsOf(who(request).pub) : [];
+      return { seats: true, holds: true, ...(mine.length ? { tickets: mine } : {}) };
+    },
     authorize({ request, write }) {
       if (!write) return true;
       if (internal.has(request)) return true;
@@ -91,7 +103,8 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
   // booking pays for it once (the kit's test provider: no money moves) and confirms the seats
   // as sold. A paid booking is a ticket, which the door will scan (`stages`).
   const store = { get: log.get, under: log.under, write };
-  const tickets = createStages({ store, collection: 'tickets', steps: ['booked', 'scanned'] });
+  // Who may scan is the app's to say (a door-shift device); the stage itself only goes once.
+  const tickets = createStages({ store, collection: 'tickets', steps: ['booked', 'scanned'], may: ({ to }) => to === 'scanned' });
   const reserve = createReserve({
     store,
     holds,
@@ -196,6 +209,27 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
         'lapsed-after-payment': 'Your hold ran out while the payment went through. The theatre will refund it.',
       };
       return { error: words[done.error] ?? 'That didn’t go through. Try again.' };
+    },
+
+    /** How the box office tells who a request is from (the session cookie). */
+    identify(fn) {
+      who = fn;
+    },
+
+    /**
+     * The door scans a ticket. Once: a second scan says when it was first used. The door gets
+     * what to let in (the film, the time, the auditorium, the seats), never the guest's details.
+     */
+    async scan(key) {
+      key = String(key ?? '').trim();
+      const record = key ? log.get('tickets', key) : null;
+      if (!record) return { error: 'That isn’t one of our tickets.' };
+      const showing = showings.get(record.showing);
+      const admit = { ticket: key, film: filmsById.get(showing?.film)?.title ?? '', starts: showing?.starts ?? 0, hall: halls.get(showing?.auditorium)?.name ?? '', seats: record.units ?? [] };
+      const done = await tickets.advance(key, 'scanned');
+      if (done.ok) return { ok: true, admit };
+      if (done.error === 'wrong-step' && done.at === 'scanned') return { error: 'Already used.', used: log.get('tickets', key).scanned ?? 0, admit };
+      return { error: 'That ticket can’t be scanned.' };
     },
 
     /** A ticket the guest owns, with what it's for, or null. */
