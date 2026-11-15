@@ -9,9 +9,15 @@
 //   bookings/<key>           the kit's `reserve` draft: seats held at a showing, priced, then paid
 //   tickets/<key>            a paid booking, from the kit's `stages`: booked, then scanned at the door
 //
-// `by` and <guest> are the guest's public name (session.js), never their cookie id.
+//   settings/theatre         what a manager changed from the admin: the seat price
+//   audit/<key>              who on the staff did what, and when
+//   customers, customer-sessions, customer-tokens   guests' accounts (kit customers)
+//
+// `by` and <guest> are the guest's public name (session.js), never their cookie id. A ticket is
+// a guest's by that name and, signed in, by their account (`customer`).
 import { createHash } from 'node:crypto';
 import { createSyncServer } from '@zubra/sync/server';
+import { SECRET } from '@potomac-solutions/kit/store';
 import { createHolds } from '@potomac-solutions/kit/hold';
 import { createReserve } from '@potomac-solutions/kit/reserve';
 import { createPay, testProvider } from '@potomac-solutions/kit/pay';
@@ -51,7 +57,8 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
   const internal = new WeakSet();
   // Who is asking, from a request: the server (server.js) says how. Until then, nobody.
   let who = () => null;
-  const ticketsOf = (pub) => log.under('tickets').filter((ticket) => ticket.holder === pub).map((ticket) => ticket.key);
+  const owns = (guest, ticket) => Boolean(guest && ticket && (ticket.holder === guest.pub || (guest.customer && ticket.customer === guest.customer)));
+  const ticketsOf = (guest) => log.under('tickets').filter((ticket) => owns(guest, ticket)).map((ticket) => ticket.key);
 
   const sync = createSyncServer({
     log,
@@ -60,10 +67,12 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
     // never leave the server.
     scope({ request }) {
       if (internal.has(request)) return null; // the server's own writes: everything
-      const mine = who(request) ? ticketsOf(who(request).pub) : [];
+      const mine = who(request) ? ticketsOf(who(request)) : [];
       return { seats: true, holds: true, ...(mine.length ? { tickets: mine } : {}) };
     },
-    authorize({ request, write }) {
+    authorize({ request, collection, write }) {
+      // Accounts, sessions and reset tokens, and the admin's records, are the server's alone.
+      if (SECRET.includes(collection) || collection === 'audit' || collection === 'settings') return internal.has(request);
       if (!write) return true;
       if (internal.has(request)) return true;
       // Presence (who else is looking at a showing) stores nothing; anyone may join.
@@ -110,7 +119,8 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
     holds,
     pay: createPay({ provider: testProvider(), store }),
     stages: tickets,
-    base: SEAT_CENTS,
+    // A seat's price: what a manager set from the admin, or the default.
+    base: () => log.get('settings', 'theatre')?.seatCents ?? SEAT_CENTS,
     pools: (pool) => showings.has(pool),
   });
 
@@ -200,7 +210,8 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
       if (!found || String(form.get('checkout') ?? '') !== found.key) return { error: 'Your seats aren’t held any more. Choose them again.' };
       const done = await reserve.book(guest.pub, found.key, {
         method: { card: String(form.get('card') ?? '') },
-        fields: { showing: showing.id, name: String(form.get('name') ?? '').trim().slice(0, 100), email: String(form.get('email') ?? '').trim().slice(0, 200) },
+        // What it was for is kept on the ticket, so reports can read it after the showing is gone.
+        fields: { showing: showing.id, film: showing.film, starts: showing.starts, auditorium: showing.auditorium, customer: guest.customer ?? '', name: String(form.get('name') ?? '').trim().slice(0, 100), email: String(form.get('email') ?? '').trim().slice(0, 200) },
         description: 'CineStack tickets (test mode)',
       });
       if (done.ok) return { ok: true, ticket: found.key };
@@ -239,7 +250,7 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
       if (!guest) return [];
       return log
         .under('tickets')
-        .filter((record) => record.holder === guest.pub && showings.has(record.showing))
+        .filter((record) => owns(guest, record) && showings.has(record.showing))
         .map((record) => {
           const showing = showings.get(record.showing);
           return { ...record, showing, film: filmsById.get(showing.film), hall: halls.get(showing.auditorium) };
@@ -250,10 +261,64 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
     /** A ticket the guest owns, with what it's for, or null. */
     ticket(guest, key) {
       const record = log.get('tickets', key);
-      if (!record || !guest || record.holder !== guest.pub) return null;
+      if (!record || !owns(guest, record)) return null;
       const showing = showings.get(record.showing);
       return { key, ...record, showing, film: filmsById.get(showing?.film), hall: halls.get(showing?.auditorium) };
     },
+
+    // ---- Accounts, the admin and the manager's settings ---------------------------------------
+    /** On signing in or up: this browser's tickets join the account. */
+    async claim(guest, customer) {
+      let claimed = 0;
+      for (const ticket of log.under('tickets')) {
+        if (ticket.holder === guest?.pub && !ticket.customer) {
+          await write('tickets', ticket.key, { customer });
+          claimed++;
+        }
+      }
+      return claimed;
+    },
+    /**
+     * Every ticket, newest showing first, with what it was for: from tonight's showings, or from
+     * what the ticket kept (earlier nights' showings aren't in memory).
+     */
+    allTickets() {
+      return log
+        .under('tickets')
+        .map((record) => {
+          const showing = showings.get(record.showing);
+          const film = filmsById.get(showing?.film ?? record.film);
+          return { ...record, film, starts: showing?.starts ?? record.starts ?? 0, hall: halls.get(showing?.auditorium ?? record.auditorium), tonight: Boolean(showing) };
+        })
+        .sort((a, b) => b.starts - a.starts);
+    },
+    /** How full each of tonight's showings is: seats sold, held and in all. */
+    occupancy() {
+      return [...showings.values()]
+        .map((showing) => {
+          const seats = seatIds.get(showing.auditorium).size;
+          const states = [...taken(showing.id).values()];
+          return { ...showing, film: filmsById.get(showing.film), hall: halls.get(showing.auditorium), seats, sold: states.filter((one) => one.state === 'sold').length, held: states.filter((one) => one.state === 'held').length };
+        })
+        .sort((a, b) => a.starts - b.starts);
+    },
+    films: () => films,
+    halls: () => auditoriums,
+    seatPrice: () => log.get('settings', 'theatre')?.seatCents ?? SEAT_CENTS,
+    async setSeatPrice(form) {
+      const match = /^\$?\s*(\d{1,3})(?:\.(\d{1,2}))?$/.exec(String(form.get('price') ?? '').trim());
+      const cents = match ? Number(match[1]) * 100 + Number((match[2] ?? '0').padEnd(2, '0')) : 0;
+      if (cents < 100 || cents > 10_000) return { error: 'Give a seat price from $1 to $100.' };
+      await write('settings', 'theatre', { seatCents: cents });
+      return { ok: true, cents };
+    },
+    /** Something someone on the staff did, for the activity list. */
+    async audit(by, what, ref = '') {
+      await write('audit', `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, { by: by?.name ?? 'System', what: String(what).slice(0, 200), ref, at: Date.now() });
+    },
+    activity: (limit = 20) => log.under('audit').sort((a, b) => b.at - a.at).slice(0, limit),
+    /** The server's own write, for the demo seed's history. */
+    write,
 
     close() {
       holds.close();

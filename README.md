@@ -17,19 +17,25 @@ Choosing seats for a showing, paying for them, getting a ticket, and being let i
 - **The door** (`/staff/door`) scans a ticket once. A photo of the ticket's code (on a phone, the photo picker opens the camera) is decoded in the browser by symbology's WebAssembly decoder, or the code can be typed, with or without JavaScript. The door sees what to let in: the film, time, auditorium and seats, never who booked. A second scan says when the ticket was first used, and two doors scanning at the same moment let it in once. The guest's ticket page shows "Used at 7:41 PM" as it happens.
 - **Staff accounts** are the Potomac kit's `staff` and `staff/pages`. A new theatre prints a one-time link for its first owner when the server starts; the owner invites the rest from **People**, with a link for each that works once. Passwords are hashed with scrypt, sessions can be ended, five wrong passwords lock an email for fifteen minutes, and none of it is ever in a page's Sync scope.
 - A page reads only what it shows: every showing's seats and holds, and the guest's own tickets. Bookings, payments and other guests' tickets (with their names and emails) never leave the server.
-- Every seat costs $11.00 for now. Price rules (adult, child, matinee, discount day, 3D) come in the prices milestone.
+- **Guest accounts** are the kit's `customers`. Sign up, sign in or reset a password (the link goes to the admin's **Outbox**). Tickets bought in that browser join the account. Signed in on any device, they're all there, and the payment page fills in the name and email.
+- **The admin** (`/admin`, staff sign-in) shows tonight at a glance: seats sold against capacity, how many tickets have been scanned, how full each showing is, the box office against the month before, and staff activity. It lists every ticket (search, filters, CSV) and every guest account. Managers also see reports by night or week (by film, auditorium, time of night and day of the week, with CSV), set the seat price and read the outbox.
+- A seat's price is $11.00 unless a manager changes it. A new price applies to seats chosen from then on. Each ticket keeps what it was for (film, time, auditorium), so the reports can read it after that night's showings are gone. Price rules (adult, child, matinee, discount day, 3D) come in the prices milestone.
 
 ## Try it
 
-`npm install`, then `npm start`, and open http://localhost:3000. Two browser windows side by side (one of them private, so it's another guest) show the live parts best.
+`npm install`, then `npm run demo`: it adds thirteen weeks of made-up past tickets, forty guest accounts and tonight's bookings (made the real way), and starts the server. It prints three sign-ins, for this machine only. The manager is `manager@example.com` / `hemlock-manager-demo` and door staff is `door@example.com` / `hemlock-door-demo`, both at `/admin`. The guest is `riley@example.com` / `hemlock-guest-demo` at `/account`. `npm start` alone keeps what's there. `npm run seed -- --fresh` starts over.
+
+Open http://localhost:3000. Two browser windows side by side (one of them private, so it's another guest) show the live parts best.
 
 1. **Pick a showing** from Tonight. Tap a few seats. In the other window, open the same showing: your seats show as taken there, and change as you tap.
 2. **Book.** The bar under the map says what you hold and the total. Press **Book**, fill in a name and email, and pay with any card number (`4000 0000 0000 0002` is declined, to see that). You get a ticket with a QR code, and your seats are sold for everyone.
 3. **Find it again.** Your tickets are listed at the top of Tonight.
 4. **At the door.** In the other window, open **The door (staff)** from the footer and sign in with the owner account (set it up from the link the server printed at start). Type the code from the ticket's address (`/ticket/<code>`), or, on a phone, choose a photo and take one of the ticket. It says **Admit**, and the guest's ticket says **Used at** without a reload. Scan it again: **Already used**, with the time.
-5. **Without JavaScript** (turn it off in the browser's settings), seats are checkboxes with a button, and booking and the door work the same.
+5. **An account.** Make one after booking: the ticket joins it, and it's there when you sign in on another device.
+6. **Run the theatre.** At `/admin`, sign in as the manager. You get tonight's showings and how full each is, every ticket and guest, the reports, and the seat price.
+7. **Without JavaScript** (turn it off in the browser's settings), seats are checkboxes with a button, and booking, accounts, the admin and the door work the same.
 
-Every seat is $11.00 for now. Prices, snacks, trailers, the lobby boards and the manager's admin are the next milestones (`plan/roadmap-theatre.md` in the planning project).
+Snacks, trailers, price rules and the lobby boards are the next milestones (`plan/roadmap-theatre.md` in the planning project).
 
 ## How it is put together
 

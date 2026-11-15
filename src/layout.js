@@ -1,8 +1,53 @@
+import { CHART_CSS } from '@potomac-solutions/kit/charts';
 // The page around the components: the theatre's frame, and the connection to the Sync log.
 export const escape = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const STYLE = `
+  .site-head nav { margin-left: auto; display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
+  .site-head nav a { font-size: 0.95rem; font-weight: 600; text-decoration: none; opacity: 0.92; }
+  .site-head nav a:hover, .site-head nav a[aria-current] { text-decoration: underline; opacity: 1; }
+  main.wide { width: min(76rem, 100% - 2 * clamp(1rem, 4vw, 2.5rem)); }
+  .hero { display: grid; gap: 1rem; padding: clamp(1.5rem, 5vw, 3rem); border-radius: var(--radius); background: var(--primary); color: #fff; }
+  .hero h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); }
+  .hero .lede { color: rgba(255,255,255,0.86); font-size: 1.15rem; max-width: 42rem; }
+  .hero .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .hero .go { background: var(--accent); color: #1f1a10; }
+  .hero .button.light { background: rgba(255,255,255,0.16); color: #fff; }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+  .stack { display: grid; gap: 0.75rem; }
+  .admin { display: grid; grid-template-columns: 13rem 1fr; gap: 1.5rem; align-items: start; }
+  .admin-nav { position: sticky; top: 1rem; display: grid; gap: 0.15rem; padding: 0.75rem; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+  .admin-nav a { padding: 0.45rem 0.6rem; border-radius: 0.4rem; text-decoration: none; font-weight: 600; }
+  .admin-nav a[aria-current] { background: var(--muted); color: var(--primary); }
+  .admin-nav small { padding: 0.6rem 0.6rem 0.2rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+  .admin-body { display: grid; gap: 1.25rem; min-width: 0; }
+  @media (max-width: 52rem) { .admin { grid-template-columns: 1fr; } .admin-nav { position: static; grid-auto-flow: column; overflow-x: auto; } .admin-nav small { display: none; } }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.75rem; }
+  .tile { padding: 0.9rem 1rem; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+  .tile span { display: block; color: var(--muted-foreground); font-size: 0.85rem; font-weight: 600; }
+  .tile strong { display: block; font-size: 1.7rem; line-height: 1.2; }
+  .tile small { color: var(--muted-foreground); }
+  .filters { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: end; }
+  .filters label { font-size: 0.9rem; }
+  .table-wrap { overflow-x: auto; }
+  .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--muted); font-size: 0.8rem; font-weight: 700; }
+  .badge.booked { background: #e3eef7; color: #163e5c; }
+  .badge.cancelled, .badge.off { background: #fde4e1; color: #7a1f17; }
+  .badge.past, .badge.handled { background: #dff3e6; color: #13472a; }
+  .muted { color: var(--muted-foreground); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pager { display: flex; gap: 1rem; align-items: center; }
+  .admin dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.3rem 1rem; margin: 0; } .admin dt { font-weight: 700; } .admin dd { margin: 0; }
+  .admin table, .account table { width: 100%; border-collapse: collapse; } .admin th, .admin td, .account th, .account td { padding: 0.5rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  .admin label, .account-form label { display: grid; gap: 0.3rem; font-weight: 600; }
+  .admin input, .admin select, .account-form input { font: inherit; padding: 0.55rem 0.7rem; border-radius: 0.5rem; border: 1px solid var(--border); background: var(--card); color: inherit; }
+  .admin button, .account-form button, a.button { font: inherit; font-weight: 700; padding: 0.6rem 1.05rem; border: 0; border-radius: 0.5rem; background: var(--primary); color: var(--primary-foreground); cursor: pointer; text-decoration: none; justify-self: start; }
+  .admin .button.light, .account-form .button.light, a.button.light { background: var(--muted); color: var(--foreground); }
+  .panel { display: grid; gap: 0.9rem; align-content: start; padding: 1.1rem 1.2rem; border-radius: var(--radius); background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+  .panel.filters { display: flex; }
+  .ok { margin: 0; padding: 0.6rem 0.9rem; border-radius: 0.5rem; background: #dff3e6; color: #13472a; }
+
   :root {
     --background: #14161b; --foreground: #eceef3; --card: #20232b; --border: #333847; --muted-foreground: #9299ab;
     --accent: #ffd166; --seat-mine: var(--accent);
@@ -62,9 +107,20 @@ const STYLE = `
   .panel input, .panel select { font: inherit; padding: 0.55rem 0.7rem; border-radius: 0.5rem; border: 1px solid var(--border); background: var(--muted); color: inherit; }
   .panel button, .button { font: inherit; font-weight: 700; padding: 0.6rem 1.1rem; border: 0; border-radius: 0.5rem; background: var(--accent); color: #1a1c22; cursor: pointer; text-decoration: none; justify-self: start; }
   .button.light { background: var(--muted); color: var(--foreground); padding: 0.3rem 0.7rem; }
+  .hero { background: radial-gradient(circle at 20% 0%, #3a3320, #14161b 70%); color: var(--foreground); box-shadow: 0 0 0 1px var(--border); }
+  .hero .lede { color: var(--muted-foreground); }
+  .hero .go { background: var(--accent); color: #1a1c22; padding: 0.6rem 1.1rem; border-radius: 0.5rem; font-weight: 700; text-decoration: none; }
+  .hero .button.light { background: var(--muted); color: var(--foreground); padding: 0.6rem 1.1rem; border-radius: 0.5rem; font-weight: 700; text-decoration: none; }
+  .admin-nav a[aria-current] { color: var(--accent); }
 `;
 
-export function layout({ title, theatre, body, actionsScript = '' }) {
+/**
+ * `nav`: who is looking: `customer` (signed in), `staff` (on the staff). `wide` gives the admin
+ * pages more room; `here` marks the current link.
+ */
+export function layout({ title, theatre, body, actionsScript = '', nav = {}, wide = false, here = '' }) {
+  const link = (href, words) => `<a href="${href}"${here === href ? ' aria-current="page"' : ''}>${words}</a>`;
+  const links = [link('/#tonight', 'Tonight'), nav.customer ? link('/account', 'Your account') : link('/account/sign-in', 'Sign in'), ...(nav.staff ? [link('/admin', 'Admin')] : [])].join('');
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -72,15 +128,15 @@ export function layout({ title, theatre, body, actionsScript = '' }) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>${escape(title)} · ${escape(theatre.name)}</title>
-  <style>${STYLE}</style>
+  <style>${STYLE}${CHART_CSS}</style>
 </head>
 <body>
   <p class="concept">${escape(theatre.concept)}</p>
-  <header class="site-head"><a href="/">${escape(theatre.name)}</a><span>${escape(theatre.town)}</span></header>
-  <main>
+  <header class="site-head"><a href="/">${escape(theatre.name)}</a><span>${escape(theatre.town)}</span><nav aria-label="Site">${links}</nav></header>
+  <main${wide ? ' class="wide"' : ''}>
     ${body}
   </main>
-  <footer class="site-foot"><a href="/">Tonight</a> · <a href="/staff/door">The door (staff)</a></footer>
+  <footer class="site-foot"><a href="/">Tonight</a> · <a href="/account">Your account</a> · <a href="/staff/door">The door (staff)</a> · <a href="/admin">Admin (staff)</a></footer>
   ${actionsScript}
   <script type="module">
     import { connect } from '@zubra/sync/connect';
