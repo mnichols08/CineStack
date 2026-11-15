@@ -4,7 +4,7 @@ import { createApp } from '../server.js';
 
 for (const cache of [true, false]) {
   test(`showing links render seats and serve browser modules (cache: ${cache})`, async (t) => {
-    const app = await createApp({ db: ':memory:', secret: 'test', cache });
+    const app = await createApp({ db: ':memory:', secret: 'test-secret-of-at-least-thirty-two-characters', cache });
     t.after(async () => {
       app.closeAllConnections();
       await new Promise((resolve, reject) => app.close((error) => error ? reject(error) : resolve()));

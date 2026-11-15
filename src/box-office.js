@@ -158,7 +158,7 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
      * JavaScript). Without it, the guest's seats become exactly the ticked ones (the plain form).
      * All or nothing: if any seat they want has gone, nothing changes.
      */
-    async choose(guest, formData) {
+    async choose(guest, formData, { client } = {}) {
       if (!guest) return { error: 'Open the showing again to choose seats.' };
       const showing = showings.get(String(formData.get('showing') ?? ''));
       if (!showing) return { error: 'That showing is gone.' };
@@ -169,14 +169,14 @@ export function createBoxOffice({ db = ':memory:', holdMs = 5 * 60_000, sweepMs 
       if (!units.length) {
         // Nothing chosen: let go of the draft's seats (or of a hold with no draft behind it).
         if (before) await reserve.release(guest.pub, before.key);
-        else await holds.choose(guest.pub, showing.id, { units: [] });
+        else await holds.choose(guest.pub, showing.id, { units: [] }, { client });
         return { ok: true, seats: [], until: 0 };
       }
-      const answer = await reserve.hold(guest.pub, { key: before?.key ?? bookingKey(), pools: [showing.id], units, valid: seatIds.get(showing.auditorium) });
+      const answer = await reserve.hold(guest.pub, { key: before?.key ?? bookingKey(), pools: [showing.id], units, valid: seatIds.get(showing.auditorium), client });
       if (answer.ok) return { ok: true, seats: answer.units, until: answer.until };
       const words = {
         unknown: 'No such seat.',
-        limit: `You can hold up to ${MAX_SEATS} seats at once.`,
+        limit: answer.max === MAX_SEATS ? `You can hold up to ${MAX_SEATS} seats at once.` : 'Too many seats are held from your connection right now. Try again in a few minutes.',
         taken: `Seat ${answer.unit} was just taken.`,
         'in-progress': 'Your booking is going through. Wait a moment.',
       };

@@ -27,7 +27,7 @@ const OWNER = { email: 'owner@example.com', name: 'Test Owner', password: 'test 
 const COST = { N: 2 ** 10, r: 8, p: 1 };
 
 async function start(name, options = {}) {
-  const server = await createApp({ db: join(dir, `${name}.db`), cache: false, secret: 'test', staffCost: COST, ...options });
+  const server = await createApp({ db: join(dir, `${name}.db`), cache: false, secret: 'test-secret-of-at-least-thirty-two-characters', staffCost: COST, ...options });
   const made = await server.staff.accept(await server.staff.setup(), OWNER);
   if (!made.ok) throw new Error(made.error);
   await new Promise((done) => server.listen(0, done));
@@ -135,6 +135,27 @@ test('without JavaScript: tick seats, press the button, and they are held', asyn
   assert.ok(await guest.seat(a).isChecked(), 'the seats already held are kept');
   await guest.context.close();
   await other.context.close();
+});
+
+test('one address holds at most 16 seats, however many cookieless guests it is', async () => {
+  const site = await start('one-address');
+  try {
+    // A script that loads the page for a fresh guest cookie each time, then posts the plain form.
+    const hold = async (seats) => {
+      const cookie = (await fetch(`${site.base}${site.path}`)).headers.get('set-cookie').split(';')[0];
+      const form = new URLSearchParams([['showing', site.showing], ...seats.map((seat) => ['seat', seat])]);
+      return fetch(`${site.base}/_zb/action/seat-chart/choose`, { method: 'POST', body: form, headers: { cookie, origin: site.base, accept: 'application/json' } }).then((response) => response.json());
+    };
+    const seats = freeSeats(site, 24);
+    const before = site.server.boxOffice.taken(site.showing).size;
+    const answers = [];
+    for (let i = 0; i < 24; i += 8) answers.push(await hold(seats.slice(i, i + 8)));
+    assert.deepEqual(answers.map((answer) => Boolean(answer.ok)), [true, true, false]);
+    assert.match(answers[2].error, /from your connection/);
+    assert.equal(site.server.boxOffice.taken(site.showing).size - before, 16);
+  } finally {
+    stop(site.server);
+  }
 });
 
 test('the same seat, at the same moment: one guest gets it', async () => {

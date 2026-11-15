@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { createZubra } from '@zubra/server';
 import { createActions } from '@zubra/actions';
 import { createStaff } from '@potomac-solutions/kit/staff';
-import { staffPages } from '@potomac-solutions/kit/staff/pages';
+import { staffPages, clientAddress } from '@potomac-solutions/kit/staff/pages';
 import { createNotices } from '@potomac-solutions/kit/notice';
 import { loadQr } from '@journey-to-code/symbology';
 import { createBoxOffice } from './src/box-office.js';
@@ -41,19 +41,24 @@ const time = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric',
 export async function createApp({ db = join(process.env.DATA_DIR ?? here, 'cinestack.db'), cache = true, secret = process.env.SESSION_SECRET, holdMs, sweepMs, staffCost } = {}) {
   if (!secret) {
     if (process.env.NODE_ENV === 'production') throw new Error('Set SESSION_SECRET.');
-    secret = 'cinestack-development-only';
+    // The kit signs nothing with a secret under 32 characters.
+    secret = 'cinestack-development-only-not-a-secret';
   }
   const boxOffice = createBoxOffice({ db, holdMs, sweepMs });
   const session = sessions({ secret });
   // The theatre's people, in its own log; sign-in, links, people and passwords are the kit's pages.
   const production = process.env.NODE_ENV === 'production';
+  // How many proxies in front add to X-Forwarded-For (one on Railway).
+  const proxies = Number(process.env.TRUST_PROXIES ?? 0);
   const staff = createStaff({ store: boxOffice.store, secure: production, ...(staffCost ? { cost: staffCost } : {}) });
   const onShift = (from) => staff.can(staff.session(from), 'staff');
   const zubra = createZubra({ components, cache, packages: ['@potomac-solutions/kit/components'] });
   const qr = await loadQr();
   const actions = await createActions({
     components,
-    context: ({ request }) => ({ boxOffice, guest: session.fromRequest(request), staff: onShift(request) }),
+    // `client`: the guest's address, so one address holds only so many seats however many guests
+    // it is (a script with no cookie is a new guest every time). `req` is there on Node only.
+    context: ({ request, req }) => ({ boxOffice, guest: session.fromRequest(request), staff: onShift(request), client: req ? clientAddress(req, { proxies }) : '' }),
   });
   boxOffice.identify((request) => session.fromRequest(request));
   const served = files();
@@ -119,7 +124,7 @@ ${p.render('door-scanner', { resultNow: result ?? {}, timeZone: boxOffice.theatr
 </section>`;
   }
   const page = (res, p, title, body) => send(res, 200, p.finish(layout({ title, theatre: boxOffice.theatre, body, actionsScript: actions.script() })));
-  const pages = staffPages({ staff, notices, proxies: Number(process.env.TRUST_PROXIES ?? 0), home: '/staff/door', business: boxOffice.theatre.name, secure: production, render: (res, title, body) => page(res, zubra.page(), title, body) });
+  const pages = staffPages({ staff, notices, proxies, home: '/staff/door', business: boxOffice.theatre.name, secure: production, render: (res, title, body) => page(res, zubra.page(), title, body) });
 
   function home(p, guest) {
     const mine = boxOffice.ticketsFor(guest);

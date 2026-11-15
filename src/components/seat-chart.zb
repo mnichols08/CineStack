@@ -22,7 +22,7 @@
 
   export async function choose(formData, context) {
     'use server'
-    return context.boxOffice.choose(context.guest, formData)
+    return context.boxOffice.choose(context.guest, formData, { client: context.client })
   }
 
   onMount(() => {
